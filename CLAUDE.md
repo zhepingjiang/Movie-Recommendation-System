@@ -27,7 +27,7 @@ This is a monorepo with three services:
 ## Testing & Verification
  
 - After scaffolding or modifying a service, always try to run/build it and confirm there are no errors before telling me it's done.
-- For backend changes, prefer running `mvn test` if tests exist.
+- For backend changes, prefer running `./gradlew test` if tests exist.
 - For frontend changes, prefer running `npm run build` to catch type errors.
 - Do not mark a task as complete if you haven't verified it actually runs.
 
