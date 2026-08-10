@@ -1,33 +1,73 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { allTags, genres, mockMovies } from '../data/mockMovies';
+import { fetchGenres, fetchMovies } from '../api/movies';
+import type { Movie } from '../types/movie';
 import MovieCard from '../components/MovieCard';
 
 const RATING_OPTIONS = [0, 6, 7, 8, 9];
+const PAGE_SIZE = 24;
+const DEBOUNCE_MS = 300;
 
 export default function SearchPage() {
   const [searchParams] = useSearchParams();
-  const [query, setQuery] = useState(searchParams.get('q') ?? '');
+  const [queryInput, setQueryInput] = useState(searchParams.get('q') ?? '');
+  const [debouncedQuery, setDebouncedQuery] = useState(queryInput);
   const [genre, setGenre] = useState('All');
-  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [minRating, setMinRating] = useState(0);
+  const [page, setPage] = useState(0);
 
-  function toggleTag(tag: string) {
-    setActiveTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
-    );
-  }
+  const [genres, setGenres] = useState<string[]>([]);
+  const [results, setResults] = useState<Movie[]>([]);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return mockMovies.filter((movie) => {
-      const matchesQuery = q === '' || movie.title.toLowerCase().includes(q);
-      const matchesGenre = genre === 'All' || movie.genre === genre;
-      const matchesTags = activeTags.every((tag) => movie.tags.includes(tag));
-      const matchesRating = movie.rating >= minRating;
-      return matchesQuery && matchesGenre && matchesTags && matchesRating;
-    });
-  }, [query, genre, activeTags, minRating]);
+  useEffect(() => {
+    fetchGenres()
+      .then(setGenres)
+      .catch(() => setGenres([]));
+  }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedQuery(queryInput), DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [queryInput]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedQuery, genre, minRating]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchMovies({
+          page,
+          size: PAGE_SIZE,
+          query: debouncedQuery || undefined,
+          genre: genre === 'All' ? undefined : genre,
+          minRating: minRating || undefined,
+        });
+        if (cancelled) return;
+        setResults(res.items);
+        setTotalPages(res.totalPages);
+        setTotalElements(res.totalElements);
+      } catch {
+        if (!cancelled) setError('Could not load movies. Is the backend running?');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery, genre, minRating, page]);
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-[60px] py-10 pb-[60px]">
@@ -37,8 +77,8 @@ export default function SearchPage() {
         <input
           className="w-full max-w-[420px] rounded-md border border-white/15 bg-white/[0.08] px-3.5 py-2.5 text-sm text-[#f2f2f2] placeholder:text-[#888] focus:outline-none"
           placeholder="Search movies..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.target.value)}
         />
 
         <div className="flex flex-wrap items-center gap-6">
@@ -73,40 +113,49 @@ export default function SearchPage() {
             </select>
           </div>
         </div>
-
-        <div className="flex flex-wrap gap-2">
-          {allTags.map((tag) => {
-            const active = activeTags.includes(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => toggleTag(tag)}
-                className={
-                  active
-                    ? 'cursor-pointer rounded-full border border-[#e50914] bg-[#e50914]/20 px-3 py-1 text-xs text-white'
-                    : 'cursor-pointer rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs text-[#d0d0d0] hover:text-white'
-                }
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      <div className="mb-4 text-sm text-[#999]">{results.length} results</div>
+      {error && <div className="mb-4 text-sm text-[#e50914]">{error}</div>}
+      {!error && <div className="mb-4 text-sm text-[#999]">{totalElements} results</div>}
 
-      {results.length > 0 ? (
-        <div className="grid grid-cols-[repeat(auto-fill,160px)] gap-x-3.5 gap-y-8">
-          {results.map((movie) => (
-            <MovieCard key={movie.id} movie={movie} />
-          ))}
-        </div>
+      {loading ? (
+        <div className="py-16 text-center text-sm text-[#999]">Loading…</div>
+      ) : results.length > 0 ? (
+        <>
+          <div className="grid grid-cols-[repeat(auto-fill,160px)] gap-x-3.5 gap-y-8">
+            {results.map((movie) => (
+              <MovieCard key={movie.id} movie={movie} />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="mt-10 flex items-center justify-center gap-4">
+              <button
+                type="button"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+                className="cursor-pointer rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm text-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ‹ Prev
+              </button>
+              <span className="text-sm text-[#999]">
+                Page {page + 1} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page + 1 >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="cursor-pointer rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm text-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next ›
+              </button>
+            </div>
+          )}
+        </>
       ) : (
-        <div className="py-16 text-center text-sm text-[#999]">
-          No movies match your filters.
-        </div>
+        !error && (
+          <div className="py-16 text-center text-sm text-[#999]">No movies match your filters.</div>
+        )
       )}
     </div>
   );

@@ -1,21 +1,18 @@
 import type { Movie } from "../types/movie";
+import { formatRuntime, releaseYear } from "../utils/format";
 
 interface HeroProps {
   movie: Movie;
 }
 
-function formatRuntime(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hours}h ${mins}m`;
-}
-
 export default function Hero({ movie }: HeroProps) {
+  const runtime = formatRuntime(movie.durationMin);
+
   return (
     <div className="relative -mt-[76px] flex h-[560px] items-end overflow-hidden pb-[60px]">
       <div
         className="absolute inset-0 z-0 bg-cover bg-[center_30%]"
-        style={{ backgroundImage: `url('${movie.backdropUrl}')` }}
+        style={{ backgroundImage: movie.posterUrl ? `url('${movie.posterUrl}')` : undefined }}
       />
       <div className="absolute inset-0 z-[1] bg-[linear-gradient(90deg,rgba(11,11,15,0.97)_15%,rgba(11,11,15,0.55)_50%,rgba(11,11,15,0.1)_85%)]" />
       <div className="absolute inset-x-0 bottom-0 z-[1] h-[220px] bg-[linear-gradient(180deg,rgba(11,11,15,0)_0%,#0b0b0f_100%)]" />
@@ -29,14 +26,14 @@ export default function Hero({ movie }: HeroProps) {
           </div>
           <div className="mb-4 flex items-center gap-2.5 text-[13px] text-[#ccc]">
             <span className="rounded bg-white/[0.12] px-2 py-0.5 font-semibold text-[#f5c518]">
-              ★ {movie.rating.toFixed(1)}
+              ★ {movie.averageRating.toFixed(1)}
             </span>
-            <span>{movie.releaseYear}</span>
-            <span>· {movie.genre}</span>
-            <span>· {formatRuntime(movie.runtimeMinutes)}</span>
+            <span>{releaseYear(movie.releaseDate)}</span>
+            <span>· {movie.genres.join(', ') || 'Unknown'}</span>
+            {runtime && <span>· {runtime}</span>}
           </div>
           <div className="mb-[22px] text-sm leading-[1.6] text-[#cfcfcf]">
-            {movie.synopsis}
+            {movie.description}
           </div>
           <div className="flex gap-3">
             <button className="cursor-pointer rounded-md border-none bg-[#e50914] px-[26px] py-[11px] text-sm font-semibold text-white">
