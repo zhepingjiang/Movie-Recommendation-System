@@ -46,11 +46,17 @@ public class Movie {
     @Column(name = "duration_min")
     private Integer durationMin;
 
-    @Column(name = "average_rating", nullable = false, precision = 3, scale = 2)
+    @Column(name = "average_rating", nullable = false, precision = 4, scale = 2)
     private BigDecimal averageRating;
 
     @Column(name = "rating_count", nullable = false)
     private Integer ratingCount;
+
+    @Column(name = "tmdb_id", unique = true)
+    private Integer tmdbId;
+
+    @Column(name = "poster_url", columnDefinition = "TEXT")
+    private String posterUrl;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
