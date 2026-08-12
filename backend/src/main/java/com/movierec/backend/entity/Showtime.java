@@ -16,6 +16,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code showtimes} table, representing a scheduled
+ * screening of a {@link Movie} at a {@link Theater}.
+ */
 @Entity
 @Table(name = "showtimes")
 @Getter

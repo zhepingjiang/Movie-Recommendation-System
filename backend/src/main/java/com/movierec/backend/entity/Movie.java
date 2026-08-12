@@ -21,6 +21,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code movies} table, including its many-to-many
+ * associations to {@link Genre} and {@link Tag} via join tables.
+ */
 @Entity
 @Table(name = "movies")
 @Getter

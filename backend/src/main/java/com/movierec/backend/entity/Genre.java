@@ -13,6 +13,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code genres} table. Genres are shared, reusable
+ * labels attached to movies via the {@code movie_genres} join table.
+ */
 @Entity
 @Table(name = "genres")
 @Getter

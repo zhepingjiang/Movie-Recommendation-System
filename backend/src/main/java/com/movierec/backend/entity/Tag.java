@@ -13,6 +13,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code tags} table. Tags are free-form labels attached
+ * to movies (via {@code movie_tags}), distinct from the fixed {@link Genre} taxonomy.
+ */
 @Entity
 @Table(name = "tags")
 @Getter

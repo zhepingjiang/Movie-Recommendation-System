@@ -8,10 +8,13 @@ const NAV_LINKS = [
   { label: 'My List', to: '/' },
 ];
 
+/** Sticky top navigation bar with site links and a search box that routes to /search. */
 export default function Navbar() {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
 
+  // Navigate to the search page with the query as a URL param instead of managing search state here;
+  // SearchPage reads it back out of the URL on mount.
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     navigate(query.trim() ? `/search?q=${encodeURIComponent(query.trim())}` : '/search');

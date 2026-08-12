@@ -8,8 +8,13 @@ import MovieRow from '../components/MovieRow';
 const PLACEHOLDER_POSTER =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="430"%3E%3Crect width="300" height="430" fill="%231c1c22"/%3E%3C/svg%3E';
 
+/**
+ * Movie detail page for route `/movie/:id`: shows full movie info plus a
+ * "similar movies" row sourced from the movie's primary genre.
+ */
 export default function MovieDetailPage() {
   const { id } = useParams<{ id: string }>();
+  // `undefined` = loading, `null` = fetched but not found, otherwise the loaded movie.
   const [movie, setMovie] = useState<Movie | null | undefined>(undefined);
   const [similarMovies, setSimilarMovies] = useState<Movie[]>([]);
 
@@ -24,6 +29,8 @@ export default function MovieDetailPage() {
       if (cancelled) return;
       setMovie(found);
 
+      // Only fetch similar movies once the primary movie resolves, using its first genre
+      // as a simple similarity signal, then exclude itself and cap the row at 8 results.
       if (found && found.genres[0]) {
         const similarRes = await fetchMovies({ genre: found.genres[0], size: 9 });
         if (cancelled) return;

@@ -5,6 +5,7 @@ interface HeroProps {
   movie: Movie;
 }
 
+/** Large banner shown at the top of the home page, featuring a single highlighted movie. */
 export default function Hero({ movie }: HeroProps) {
   const runtime = formatRuntime(movie.durationMin);
 

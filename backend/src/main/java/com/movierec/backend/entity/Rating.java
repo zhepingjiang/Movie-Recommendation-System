@@ -15,6 +15,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code ratings} table, recording a single user's score
+ * for a movie. Uses the composite key {@link RatingId} (user + movie) as its identity.
+ */
 @Entity
 @Table(name = "ratings")
 @Getter

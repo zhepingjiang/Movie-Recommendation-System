@@ -1,3 +1,4 @@
+/** Site footer with placeholder legal links, rendered on every page via Layout. */
 export default function Footer() {
   return (
     <div className="border-t border-white/[0.08] py-10 pb-[50px]">

@@ -7,6 +7,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Composite primary key for {@link Rating}: a (user, movie) pair, since a user
+ * may rate a given movie at most once.
+ */
 @Embeddable
 @Data
 @NoArgsConstructor

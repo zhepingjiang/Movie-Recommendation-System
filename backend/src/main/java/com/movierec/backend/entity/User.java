@@ -13,6 +13,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code users} table.
+ *
+ * <p><b>Security-sensitive:</b> {@code passwordHash} stores a hashed credential and
+ * must never be logged, serialized to API responses, or persisted in plaintext.
+ */
 @Entity
 @Table(name = "users")
 @Getter

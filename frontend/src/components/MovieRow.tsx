@@ -8,6 +8,7 @@ interface MovieRowProps {
   viewAllTo?: string;
 }
 
+/** Horizontally scrollable row of MovieCards under a titled heading with a "View all" link. */
 export default function MovieRow({ title, movies, viewAllTo = '/search' }: MovieRowProps) {
   return (
     <div className="mb-10">

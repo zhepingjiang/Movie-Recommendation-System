@@ -16,6 +16,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code recommendation_cache} table. Stores precomputed
+ * recommendation scores per (user, movie, model version), typically produced offline
+ * by the recommendation service and read here to avoid recomputing on every request.
+ */
 @Entity
 @Table(name = "recommendation_cache")
 @Getter

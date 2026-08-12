@@ -6,9 +6,11 @@ interface MovieCardProps {
   movie: Movie;
 }
 
+// Inline SVG data URI used when a movie has no poster, avoiding an extra network request.
 const PLACEHOLDER_POSTER =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="430"%3E%3Crect width="300" height="430" fill="%231c1c22"/%3E%3C/svg%3E';
 
+/** Poster thumbnail card linking to a movie's detail page, used within MovieRow and SearchPage. */
 export default function MovieCard({ movie }: MovieCardProps) {
   return (
     <Link to={`/movie/${movie.id}`} className="w-40 flex-none cursor-pointer no-underline">

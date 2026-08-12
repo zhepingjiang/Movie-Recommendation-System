@@ -13,6 +13,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code theaters} table.
+ */
 @Entity
 @Table(name = "theaters")
 @Getter

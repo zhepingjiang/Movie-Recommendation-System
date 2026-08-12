@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage';
 import MovieDetailPage from './pages/MovieDetailPage';
 import SearchPage from './pages/SearchPage';
 
+/** Root component: sets up client-side routing for the app's three pages under the shared Layout. */
 function App() {
   return (
     <BrowserRouter>

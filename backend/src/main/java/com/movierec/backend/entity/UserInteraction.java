@@ -16,6 +16,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * JPA entity mapping to the {@code user_interactions} table. Logs implicit signals
+ * (e.g. views, clicks, watchlist adds — see {@code interactionType}) used as input
+ * for the recommendation pipeline, as opposed to the explicit scores in {@link Rating}.
+ */
 @Entity
 @Table(name = "user_interactions")
 @Getter

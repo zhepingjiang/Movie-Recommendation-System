@@ -6,6 +6,10 @@ import type { Movie } from '../types/movie';
 
 const ROW_SIZE = 8;
 
+/**
+ * Landing page: a hero banner for the top "recommended" movie followed by three
+ * horizontally-scrolling rows (recommended, top rated, new releases).
+ */
 export default function HomePage() {
   const [recommended, setRecommended] = useState<Movie[]>([]);
   const [trending, setTrending] = useState<Movie[]>([]);
@@ -14,12 +18,15 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Guards state updates after unmount (e.g. fast navigation away) since the fetches
+    // below aren't otherwise cancellable.
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       setError(null);
       try {
+        // Fetch all three rows concurrently rather than sequentially to minimize load time.
         const [recommendedRes, trendingRes, newReleasesRes] = await Promise.all([
           fetchMovies({ size: ROW_SIZE, sort: 'id,asc' }),
           fetchMovies({ size: ROW_SIZE, sort: 'averageRating,desc' }),

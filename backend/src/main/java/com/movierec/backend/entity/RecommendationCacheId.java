@@ -7,6 +7,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Composite primary key for {@link RecommendationCache}: a (user, movie, model version)
+ * triple, allowing multiple model versions' scores to be cached side by side.
+ */
 @Embeddable
 @Data
 @NoArgsConstructor

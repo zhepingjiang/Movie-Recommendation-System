@@ -8,9 +8,15 @@ const RATING_OPTIONS = [0, 6, 7, 8, 9];
 const PAGE_SIZE = 24;
 const DEBOUNCE_MS = 300;
 
+/**
+ * Search/browse page for route `/search`: text query, genre and minimum-rating filters,
+ * and a paginated grid of results. The initial query text is seeded from the `?q=` URL
+ * param set by Navbar's search box.
+ */
 export default function SearchPage() {
   const [searchParams] = useSearchParams();
   const [queryInput, setQueryInput] = useState(searchParams.get('q') ?? '');
+  // Debounced copy of queryInput, so the API isn't hit on every keystroke.
   const [debouncedQuery, setDebouncedQuery] = useState(queryInput);
   const [genre, setGenre] = useState('All');
   const [minRating, setMinRating] = useState(0);
@@ -23,21 +29,25 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Load the genre filter options once on mount.
   useEffect(() => {
     fetchGenres()
       .then(setGenres)
       .catch(() => setGenres([]));
   }, []);
 
+  // Debounce free-text input before it feeds into the search query below.
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedQuery(queryInput), DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [queryInput]);
 
+  // Any filter change invalidates the current page, so reset back to the first page.
   useEffect(() => {
     setPage(0);
   }, [debouncedQuery, genre, minRating]);
 
+  // Re-run the search whenever the debounced query, filters, or page number change.
   useEffect(() => {
     let cancelled = false;
 
