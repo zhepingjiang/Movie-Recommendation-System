@@ -56,9 +56,9 @@ export default function Navbar() {
           <div className="flex items-center gap-3">
             <Link to="/profile" title={user.displayName ?? user.username}>
               {user.avatarUrl ? (
-                <img src={user.avatarUrl} alt="Avatar" className="h-8 w-8 rounded-md object-cover" />
+                <img src={user.avatarUrl} alt="Avatar" className="h-8 w-8 rounded-full object-cover" />
               ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[#333] text-[13px] text-[#aaa]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#333] text-[13px] text-[#aaa]">
                   {(user.displayName ?? user.username).charAt(0).toUpperCase()}
                 </div>
               )}

@@ -32,25 +32,6 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
-    build:
-      context: ./backend
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/movierec
-      SPRING_DATASOURCE_USERNAME: movierec
-      SPRING_DATASOURCE_PASSWORD: movierec
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: avatars
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
   recommendation:
     build:
       context: ./recommendation
@@ -66,7 +47,6 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - backend
       - recommendation
 
 volumes:
