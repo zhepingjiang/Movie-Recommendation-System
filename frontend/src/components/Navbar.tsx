@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 
 const NAV_LINKS = [
   { label: 'Home', to: '/' },
@@ -12,6 +13,12 @@ const NAV_LINKS = [
 export default function Navbar() {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  async function handleLogout() {
+    await logout();
+    navigate('/');
+  }
 
   // Navigate to the search page with the query as a URL param instead of managing search state here;
   // SearchPage reads it back out of the URL on mount.
@@ -45,9 +52,33 @@ export default function Navbar() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </form>
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[#333] text-[13px] text-[#aaa]">
-          Z
-        </div>
+        {user ? (
+          <div className="flex items-center gap-3">
+            <Link to="/profile" title={user.displayName ?? user.username}>
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="Avatar" className="h-8 w-8 rounded-md object-cover" />
+              ) : (
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[#333] text-[13px] text-[#aaa]">
+                  {(user.displayName ?? user.username).charAt(0).toUpperCase()}
+                </div>
+              )}
+            </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="cursor-pointer text-sm text-[#d0d0d0] hover:text-white"
+            >
+              Log out
+            </button>
+          </div>
+        ) : (
+          <Link
+            to="/login"
+            className="cursor-pointer rounded-md border border-white/25 bg-white/10 px-4 py-1.5 text-sm text-[#f2f2f2] no-underline hover:bg-white/15"
+          >
+            Log in / Sign up
+          </Link>
+        )}
       </div>
     </div>
   );

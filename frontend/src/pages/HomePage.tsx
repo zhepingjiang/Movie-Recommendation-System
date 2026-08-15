@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import Hero from '../components/Hero';
 import MovieRow from '../components/MovieRow';
 import { fetchMovies } from '../api/movies';
+import { useAuth } from '../hooks/useAuth';
 import type { Movie } from '../types/movie';
 
 const ROW_SIZE = 8;
 
 /**
- * Landing page: a hero banner for the top "recommended" movie followed by three
- * horizontally-scrolling rows (recommended, top rated, new releases).
+ * Landing page: a hero banner followed by horizontally-scrolling movie rows. Logged-in users see
+ * a personalized "Recommended for you" row plus a hero built from it; logged-out users skip that
+ * fetch entirely and get a hero built from the top-rated movie instead.
  */
 export default function HomePage() {
+  const { user } = useAuth();
   const [recommended, setRecommended] = useState<Movie[]>([]);
   const [trending, setTrending] = useState<Movie[]>([]);
   const [newReleases, setNewReleases] = useState<Movie[]>([]);
@@ -26,14 +29,15 @@ export default function HomePage() {
       setLoading(true);
       setError(null);
       try {
-        // Fetch all three rows concurrently rather than sequentially to minimize load time.
+        // Fetch rows concurrently rather than sequentially to minimize load time. The
+        // "recommended" row is only meaningful (and only fetched) for a logged-in user.
         const [recommendedRes, trendingRes, newReleasesRes] = await Promise.all([
-          fetchMovies({ size: ROW_SIZE, sort: 'id,asc' }),
+          user ? fetchMovies({ size: ROW_SIZE, sort: 'id,asc' }) : Promise.resolve(null),
           fetchMovies({ size: ROW_SIZE, sort: 'averageRating,desc' }),
           fetchMovies({ size: ROW_SIZE, sort: 'releaseDate,desc' }),
         ]);
         if (cancelled) return;
-        setRecommended(recommendedRes.items);
+        setRecommended(recommendedRes?.items ?? []);
         setTrending(trendingRes.items);
         setNewReleases(newReleasesRes.items);
       } catch {
@@ -47,7 +51,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   if (loading) {
     return <div className="py-24 text-center text-sm text-[#999]">Loading movies…</div>;
@@ -57,12 +61,14 @@ export default function HomePage() {
     return <div className="py-24 text-center text-sm text-[#e50914]">{error}</div>;
   }
 
+  const heroMovie = user ? recommended[0] : trending[0];
+
   return (
     <>
-      {recommended[0] && <Hero movie={recommended[0]} />}
+      {heroMovie && <Hero movie={heroMovie} />}
       <div className="py-5 pb-[60px]">
         <div className="mx-auto w-full max-w-[1400px] px-[60px]">
-          <MovieRow title="Recommended for you" movies={recommended} />
+          {user && <MovieRow title="Recommended for you" movies={recommended} />}
           <MovieRow title="Top rated" movies={trending} />
           <MovieRow title="New releases" movies={newReleases} />
         </div>

@@ -12,10 +12,20 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     /**
-     * Allows GET requests to any {@code /api/**} endpoint from the local frontend dev server origin.
+     * Allows GET/POST/PUT requests to any {@code /api/**} endpoint from the local frontend dev
+     * server origin.
+     *
+     * <p><b>Security-sensitive:</b> {@code allowCredentials(true)} lets the browser send/receive
+     * the httpOnly auth cookie cross-origin; this requires an explicit (non-wildcard) origin,
+     * which is already the case here.
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**").allowedOrigins("http://localhost:5173").allowedMethods("GET");
+        registry
+                .addMapping("/api/**")
+                .allowedOrigins("http://localhost:5173")
+                .allowedMethods("GET", "POST", "PUT")
+                .allowedHeaders("Content-Type")
+                .allowCredentials(true);
     }
 }

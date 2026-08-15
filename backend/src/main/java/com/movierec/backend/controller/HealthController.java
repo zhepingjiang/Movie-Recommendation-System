@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Simple health-check endpoint used to verify the backend is up and reachable.
+ * TODO: Real health check under K8s
  */
 @RestController
 public class HealthController {
