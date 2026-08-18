@@ -23,6 +23,10 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.prod.example
+
+# Certbot-issued certs/keys (populated locally when running docker-compose.nginx.yml)
+certbot/
 
 # IDE / OS
 .idea/
