@@ -2,6 +2,7 @@ package com.movierec.backend.controller;
 
 import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.dto.PagedResponse;
+import com.movierec.backend.security.AuthenticatedUser;
 import com.movierec.backend.service.MovieService;
 import java.math.BigDecimal;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,13 +48,20 @@ public class MovieController {
     }
 
     /**
-     * Fetches a single movie by its id.
+     * Fetches a single movie by its id. Publicly accessible; if the caller is authenticated,
+     * the view is attributed to them, otherwise it's recorded as anonymous.
      *
      * @param id the movie id
+     * @param principal the authenticated caller, or null if the request is anonymous
      * @return 200 with the movie if found, otherwise 404
      */
     @GetMapping("/{id}")
-    public ResponseEntity<MovieSummaryDto> getMovieById(@PathVariable Long id) {
-        return movieService.getMovieById(id).map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
+    public ResponseEntity<MovieSummaryDto> getMovieById(
+            @PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) {
+        Long userId = principal == null ? null : principal.getId();
+        return movieService
+                .getMovieById(id, userId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

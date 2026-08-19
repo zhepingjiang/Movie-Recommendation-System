@@ -3,6 +3,7 @@ package com.movierec.backend.service;
 import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.entity.Genre;
 import com.movierec.backend.entity.Movie;
+import com.movierec.backend.event.MovieViewEventProducer;
 import com.movierec.backend.repository.MovieRepository;
 import com.movierec.backend.repository.MovieSpecifications;
 import java.math.BigDecimal;
@@ -29,6 +30,7 @@ import org.springframework.util.StringUtils;
 public class MovieService {
 
     private final MovieRepository movieRepository;
+    private final MovieViewEventProducer movieViewEventProducer;
 
     /**
      * Searches movies by combining the optional title/genre/rating filters into a single
@@ -75,12 +77,18 @@ public class MovieService {
     }
 
     /**
-     * Fetches a single movie by id, with its genres eagerly loaded.
+     * Fetches a single movie by id, with its genres eagerly loaded. On a hit, publishes a
+     * view event (to {@code movie-view-events}) for the recommendation pipeline.
      *
+     * @param userId the viewing user's id, or null for an anonymous request
      * @return the movie as a {@link MovieSummaryDto}, or empty if no movie has that id
      */
-    public Optional<MovieSummaryDto> getMovieById(Long id) {
-        return movieRepository.findByIdWithGenres(id).map(this::toSummaryDto);
+    public Optional<MovieSummaryDto> getMovieById(Long id, Long userId) {
+        Optional<MovieSummaryDto> result = movieRepository.findByIdWithGenres(id).map(this::toSummaryDto);
+        if (result.isPresent()) {
+            movieViewEventProducer.publishView(id, userId);
+        }
+        return result;
     }
 
     /** Flattens a {@link Movie} entity's genre associations into a {@link MovieSummaryDto}. */

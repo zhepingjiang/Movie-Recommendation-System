@@ -20,7 +20,7 @@ async function getJson<T>(path: string, params: Record<string, string | number |
     }
   }
   const query = searchParams.toString();
-  const res = await fetch(`${API_BASE_URL}${path}${query ? `?${query}` : ''}`);
+  const res = await fetch(`${API_BASE_URL}${path}${query ? `?${query}` : ''}`, { credentials: 'include' });
   if (!res.ok) {
     throw new Error(`Request to ${path} failed with status ${res.status}`);
   }
@@ -32,7 +32,7 @@ export function fetchMovies(params: MovieQueryParams = {}): Promise<PagedRespons
 }
 
 export async function fetchMovieById(id: number): Promise<Movie | null> {
-  const res = await fetch(`${API_BASE_URL}/api/movies/${id}`);
+  const res = await fetch(`${API_BASE_URL}/api/movies/${id}`, { credentials: 'include' });
   if (res.status === 404) {
     return null;
   }
