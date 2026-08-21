@@ -16,3 +16,8 @@ export interface PagedResponse<T> {
   totalElements: number;
   totalPages: number;
 }
+
+export interface TrendingEntry {
+  movie: Movie;
+  viewCount: number;
+}

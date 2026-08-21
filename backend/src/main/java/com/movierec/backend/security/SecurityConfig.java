@@ -52,7 +52,11 @@ public class SecurityConfig {
                                         .permitAll()
                                         .requestMatchers("/api/auth/**")
                                         .permitAll()
-                                        .requestMatchers(HttpMethod.GET, "/api/movies/**", "/api/genres/**")
+                                        .requestMatchers(
+                                                HttpMethod.GET,
+                                                "/api/movies/**",
+                                                "/api/genres/**",
+                                                "/api/trending/**")
                                         .permitAll()
                                         .requestMatchers("/api/admin/**")
                                         .hasRole("ADMIN")

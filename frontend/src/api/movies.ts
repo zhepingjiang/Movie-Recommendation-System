@@ -1,4 +1,4 @@
-import type { Movie, PagedResponse } from '../types/movie';
+import type { Movie, PagedResponse, TrendingEntry } from '../types/movie';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -44,4 +44,8 @@ export async function fetchMovieById(id: number): Promise<Movie | null> {
 
 export function fetchGenres(): Promise<string[]> {
   return getJson<string[]>('/api/genres');
+}
+
+export function fetchTrending(limit: number): Promise<TrendingEntry[]> {
+  return getJson<TrendingEntry[]>('/api/trending', { limit });
 }

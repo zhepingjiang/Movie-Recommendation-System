@@ -91,6 +91,20 @@ public class MovieService {
         return result;
     }
 
+    /**
+     * Fetches movies by id, with genres eagerly loaded.
+     *
+     * @param ids the movie ids to fetch
+     * @return the found movies keyed by id; ids with no matching movie are simply absent
+     */
+    public Map<Long, MovieSummaryDto> getMoviesByIds(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return movieRepository.findAllByIdInWithGenres(ids).stream()
+                .collect(Collectors.toMap(Movie::getId, this::toSummaryDto));
+    }
+
     /** Flattens a {@link Movie} entity's genre associations into a {@link MovieSummaryDto}. */
     private MovieSummaryDto toSummaryDto(Movie movie) {
         List<String> genreNames =

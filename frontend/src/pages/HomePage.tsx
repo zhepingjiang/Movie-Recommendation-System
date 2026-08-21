@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Hero from '../components/Hero';
 import MovieRow from '../components/MovieRow';
-import { fetchMovies } from '../api/movies';
+import { fetchMovies, fetchTrending } from '../api/movies';
 import { useAuth } from '../hooks/useAuth';
 import type { Movie } from '../types/movie';
 
@@ -10,7 +10,7 @@ const ROW_SIZE = 8;
 /**
  * Landing page: a hero banner followed by horizontally-scrolling movie rows. Logged-in users see
  * a personalized "Recommended for you" row plus a hero built from it; logged-out users skip that
- * fetch entirely and get a hero built from the top-rated movie instead.
+ * fetch entirely and get a hero built from the top trending movie instead.
  */
 export default function HomePage() {
   const { user } = useAuth();
@@ -33,12 +33,12 @@ export default function HomePage() {
         // "recommended" row is only meaningful (and only fetched) for a logged-in user.
         const [recommendedRes, trendingRes, newReleasesRes] = await Promise.all([
           user ? fetchMovies({ size: ROW_SIZE, sort: 'id,asc' }) : Promise.resolve(null),
-          fetchMovies({ size: ROW_SIZE, sort: 'averageRating,desc' }),
+          fetchTrending(ROW_SIZE),
           fetchMovies({ size: ROW_SIZE, sort: 'releaseDate,desc' }),
         ]);
         if (cancelled) return;
         setRecommended(recommendedRes?.items ?? []);
-        setTrending(trendingRes.items);
+        setTrending(trendingRes.map((entry) => entry.movie));
         setNewReleases(newReleasesRes.items);
       } catch {
         if (!cancelled) setError('Could not load movies. Is the backend running?');
@@ -69,7 +69,7 @@ export default function HomePage() {
       <div className="py-5 pb-[60px]">
         <div className="mx-auto w-full max-w-[1400px] px-[60px]">
           {user && <MovieRow title="Recommended for you" movies={recommended} />}
-          <MovieRow title="Top rated" movies={trending} />
+          <MovieRow title="Trending now" movies={trending} />
           <MovieRow title="New releases" movies={newReleases} />
         </div>
       </div>
