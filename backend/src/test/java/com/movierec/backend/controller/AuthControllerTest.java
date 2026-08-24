@@ -20,6 +20,7 @@ import com.movierec.backend.security.JwtService;
 import com.movierec.backend.security.SecurityConfig;
 import com.movierec.backend.service.AuthService;
 import java.time.Instant;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -45,7 +46,8 @@ class AuthControllerTest {
     @Test
     void registerReturnsHttpOnlyCookieAndNoPasswordHash() throws Exception {
         UserProfileDto profile =
-                new UserProfileDto(1L, "bob", "bob@example.com", "bob", null, Role.USER, Instant.now());
+                new UserProfileDto(
+                        1L, "bob", "bob@example.com", "bob", null, Role.USER, Instant.now(), Set.of());
         when(authService.register(any())).thenReturn(new AuthService.AuthResult(profile, "jwt-token"));
 
         mockMvc.perform(
@@ -63,7 +65,8 @@ class AuthControllerTest {
     @Test
     void loginReturnsHttpOnlyCookieAndNoPasswordHash() throws Exception {
         UserProfileDto profile =
-                new UserProfileDto(1L, "alice", "alice@example.com", "alice", null, Role.USER, Instant.now());
+                new UserProfileDto(
+                        1L, "alice", "alice@example.com", "alice", null, Role.USER, Instant.now(), Set.of());
         when(authService.login(any())).thenReturn(new AuthService.AuthResult(profile, "jwt-token"));
 
         mockMvc.perform(

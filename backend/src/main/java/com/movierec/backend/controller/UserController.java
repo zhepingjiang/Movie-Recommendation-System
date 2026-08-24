@@ -1,5 +1,6 @@
 package com.movierec.backend.controller;
 
+import com.movierec.backend.dto.UpdateGenrePreferencesRequest;
 import com.movierec.backend.dto.UpdateProfileRequest;
 import com.movierec.backend.dto.UserProfileDto;
 import com.movierec.backend.exception.InvalidFileException;
@@ -41,6 +42,12 @@ public class UserController {
     public UserProfileDto updateCurrentUser(
             @AuthenticationPrincipal AuthenticatedUser principal, @Valid @RequestBody UpdateProfileRequest request) {
         return userService.updateProfile(principal.getId(), request);
+    }
+
+    @PutMapping("/me/genres")
+    public UserProfileDto updateGenrePreferences(
+            @AuthenticationPrincipal AuthenticatedUser principal, @RequestBody UpdateGenrePreferencesRequest request) {
+        return userService.updateGenrePreferences(principal.getId(), request);
     }
 
     @PostMapping("/me/avatar")

@@ -1,14 +1,20 @@
 package com.movierec.backend.service;
 
+import com.movierec.backend.dto.UpdateGenrePreferencesRequest;
 import com.movierec.backend.dto.UpdateProfileRequest;
 import com.movierec.backend.dto.UserProfileDto;
+import com.movierec.backend.entity.Genre;
 import com.movierec.backend.entity.User;
+import com.movierec.backend.repository.GenreRepository;
 import com.movierec.backend.repository.UserRepository;
 import com.movierec.backend.storage.StorageService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -26,6 +32,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final StorageService storageService;
+    private final GenreRepository genreRepository;
 
     @Value("${minio.public-url}")
     private String publicUrl;
@@ -68,6 +75,17 @@ public class UserService {
         return toProfileDto(user);
     }
 
+    @Transactional
+    public UserProfileDto updateGenrePreferences(Long userId, UpdateGenrePreferencesRequest request) {
+        User user = getUserOrThrow(userId);
+        Set<Genre> genres = request.genres() == null
+                ? Set.of()
+                : new HashSet<>(genreRepository.findByNameInAndIsActiveTrue(request.genres()));
+        user.setPreferredGenres(genres);
+        user.setUpdatedAt(Instant.now());
+        return toProfileDto(user);
+    }
+
     private User getUserOrThrow(Long userId) {
         return userRepository
                 .findById(userId)
@@ -100,6 +118,7 @@ public class UserService {
                 user.getDisplayName(),
                 user.getAvatarUrl(),
                 user.getRole(),
-                user.getCreatedAt());
+                user.getCreatedAt(),
+                user.getPreferredGenres().stream().map(Genre::getName).collect(Collectors.toSet()));
     }
 }

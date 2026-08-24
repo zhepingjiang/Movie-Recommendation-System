@@ -10,6 +10,7 @@ import com.movierec.backend.exception.InvalidCredentialsException;
 import com.movierec.backend.repository.UserRepository;
 import com.movierec.backend.security.JwtService;
 import java.time.Instant;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -77,7 +78,8 @@ public class AuthService {
                 user.getDisplayName(),
                 user.getAvatarUrl(),
                 user.getRole(),
-                user.getCreatedAt());
+                user.getCreatedAt(),
+                Set.of());
     }
 
     /** Result of a successful register/login: the profile to return plus the JWT to cookie-ify. */
