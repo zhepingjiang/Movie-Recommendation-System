@@ -58,7 +58,9 @@ minio:
 recommendation:
   service:
     # FIX: the Python recommendation service must never be called directly by the browser (it has
-    # no auth of its own) — only this backend calls it, server-to-server, after resolving the
-    # caller's identity from the JWT. Port 8000 is published to the host (not the docker network)
-    # because this backend itself runs on the host rather than in docker-compose.
-    url: ${RECOMMENDATION_SERVICE_URL:http://localhost:8000}
+    # no auth of its own) — only this backend calls it, server-to-server over gRPC, after resolving
+    # the caller's identity from the JWT. Port 50051 is published to the host, loopback-only (see
+    # docker-compose.yml), because this backend itself runs on the host rather than in
+    # docker-compose.
+    host: ${RECOMMENDATION_SERVICE_HOST:localhost}
+    port: ${RECOMMENDATION_SERVICE_PORT:50051}

@@ -7,6 +7,7 @@ import com.movierec.backend.entity.Genre;
 import com.movierec.backend.entity.User;
 import com.movierec.backend.entity.UserGenre;
 import com.movierec.backend.entity.UserGenreId;
+import com.movierec.backend.exception.InvalidGenreSelectionException;
 import com.movierec.backend.repository.GenreRepository;
 import com.movierec.backend.repository.UserGenreRepository;
 import com.movierec.backend.repository.UserRepository;
@@ -86,6 +87,10 @@ public class UserService {
      * Replaces the user's genre picks with the given set. Diffs against the existing rows rather
      * than a blind delete-and-recreate: a genre that stays selected keeps its original
      * {@code weight}/{@code createdAt} instead of having them reset on every profile edit.
+     *
+     * <p>FIX: at least one genre must remain selected — this is the cold-start signal, so letting
+     * a user clear it entirely would silently break their recommendations. Rejected before any
+     * row is touched, so a bad request never partially applies.
      */
     @Transactional
     public UserProfileDto updateGenrePreferences(Long userId, UpdateGenrePreferencesRequest request) {
@@ -93,6 +98,9 @@ public class UserService {
         Set<Genre> desiredGenres = request.genres() == null
                 ? Set.of()
                 : new HashSet<>(genreRepository.findByNameInAndIsActiveTrue(request.genres()));
+        if (desiredGenres.isEmpty()) {
+            throw new InvalidGenreSelectionException("At least one genre must remain selected");
+        }
         Set<Long> desiredGenreIds = desiredGenres.stream().map(Genre::getId).collect(Collectors.toSet());
 
         List<UserGenre> existing = userGenreRepository.findByIdUserId(userId);

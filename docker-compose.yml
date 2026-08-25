@@ -69,9 +69,18 @@ services:
 
   recommendation:
     build:
-      context: ./recommendation
+      # Context is the repo root, not ./recommendation: the Dockerfile needs to reach the
+      # shared proto/ directory to generate its gRPC stubs at build time (they're gitignored,
+      # not committed -- see recommendation/scripts/generate_proto.sh).
+      context: .
+      dockerfile: recommendation/Dockerfile
     ports:
-      - "8000:8000"
+      # Loopback-only: the Spring Boot backend runs on the host (not in this compose file) and
+      # calls this service directly, but it must never be reachable from outside the host --
+      # it has no auth of its own and trusts user_id/limit as given (see RecommendationController).
+      # 8000 is the FastAPI app (just /ping now); 50051 is the gRPC server the backend calls.
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:50051:50051"
     depends_on:
       postgres:
         condition: service_healthy

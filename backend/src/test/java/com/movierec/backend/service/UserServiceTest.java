@@ -1,6 +1,7 @@
 package com.movierec.backend.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.never;
@@ -15,6 +16,7 @@ import com.movierec.backend.entity.Role;
 import com.movierec.backend.entity.User;
 import com.movierec.backend.entity.UserGenre;
 import com.movierec.backend.entity.UserGenreId;
+import com.movierec.backend.exception.InvalidGenreSelectionException;
 import com.movierec.backend.repository.GenreRepository;
 import com.movierec.backend.repository.UserGenreRepository;
 import com.movierec.backend.repository.UserRepository;
@@ -97,16 +99,31 @@ class UserServiceTest {
     }
 
     @Test
-    void updateGenrePreferencesRemovesDeselectedGenres() {
+    void updateGenrePreferencesRemovesDeselectedGenresButKeepsAtLeastOne() {
         Genre action = genre(1L, "Action");
-        UserGenre existing = existingPick(USER_ID, action, Instant.now());
-        when(genreRepository.findByNameInAndIsActiveTrue(Set.of())).thenReturn(List.of());
-        when(userGenreRepository.findByIdUserId(USER_ID)).thenReturn(List.of(existing));
+        Genre comedy = genre(2L, "Comedy");
+        UserGenre existingAction = existingPick(USER_ID, action, Instant.now());
+        UserGenre existingComedy = existingPick(USER_ID, comedy, Instant.now());
+        when(genreRepository.findByNameInAndIsActiveTrue(Set.of("Comedy"))).thenReturn(List.of(comedy));
+        when(userGenreRepository.findByIdUserId(USER_ID)).thenReturn(List.of(existingAction, existingComedy));
 
-        userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(Set.of()));
+        userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(Set.of("Comedy")));
 
-        verify(userGenreRepository).deleteAll(List.of(existing));
+        verify(userGenreRepository).deleteAll(List.of(existingAction));
         verify(userGenreRepository).saveAll(List.of());
+    }
+
+    @Test
+    void updateGenrePreferencesRejectsClearingAllGenres() {
+        when(genreRepository.findByNameInAndIsActiveTrue(Set.of())).thenReturn(List.of());
+
+        assertThatThrownBy(
+                        () -> userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(Set.of())))
+                .isInstanceOf(InvalidGenreSelectionException.class);
+
+        verify(userGenreRepository, never()).findByIdUserId(any());
+        verify(userGenreRepository, never()).deleteAll(any());
+        verify(userGenreRepository, never()).saveAll(any());
     }
 
     @Test
@@ -130,30 +147,35 @@ class UserServiceTest {
     }
 
     @Test
-    void updateGenrePreferencesIgnoresUnknownOrInactiveGenreNames() {
-        when(genreRepository.findByNameInAndIsActiveTrue(Set.of("NotAGenre"))).thenReturn(List.of());
+    void updateGenrePreferencesIgnoresUnknownGenreNamesWhenAtLeastOneValidRemains() {
+        Genre action = genre(1L, "Action");
+        when(genreRepository.findByNameInAndIsActiveTrue(Set.of("Action", "NotAGenre"))).thenReturn(List.of(action));
         when(userGenreRepository.findByIdUserId(USER_ID)).thenReturn(List.of());
-        UserProfileDto emptyProfile =
-                new UserProfileDto(USER_ID, "alice", "alice@example.com", "alice", null, Role.USER, Instant.now(), Set.of());
-        when(userProfileMapper.toDto(user)).thenReturn(emptyProfile);
 
-        UserProfileDto result = userService.updateGenrePreferences(
-                USER_ID, new UpdateGenrePreferencesRequest(Set.of("NotAGenre")));
+        userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(Set.of("Action", "NotAGenre")));
 
-        verify(userGenreRepository).saveAll(List.of());
-        assertThat(result.preferredGenres()).isEmpty();
+        verify(userGenreRepository).saveAll(savedGenresCaptor.capture());
+        assertThat(savedGenresCaptor.getValue()).extracting(UserGenre::getGenre).containsExactly(action);
     }
 
     @Test
-    void updateGenrePreferencesTreatsNullGenresAsClearingAllPicks() {
-        Genre action = genre(1L, "Action");
-        UserGenre existing = existingPick(USER_ID, action, Instant.now());
-        when(userGenreRepository.findByIdUserId(USER_ID)).thenReturn(List.of(existing));
+    void updateGenrePreferencesRejectsWhenEverySubmittedNameIsUnknownOrInactive() {
+        when(genreRepository.findByNameInAndIsActiveTrue(Set.of("NotAGenre"))).thenReturn(List.of());
 
-        userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(null));
+        assertThatThrownBy(() -> userService.updateGenrePreferences(
+                        USER_ID, new UpdateGenrePreferencesRequest(Set.of("NotAGenre"))))
+                .isInstanceOf(InvalidGenreSelectionException.class);
 
-        verify(userGenreRepository).deleteAll(List.of(existing));
+        verify(userGenreRepository, never()).findByIdUserId(any());
+    }
+
+    @Test
+    void updateGenrePreferencesRejectsNullGenres() {
+        assertThatThrownBy(() -> userService.updateGenrePreferences(USER_ID, new UpdateGenrePreferencesRequest(null)))
+                .isInstanceOf(InvalidGenreSelectionException.class);
+
         verify(genreRepository, never()).findByNameInAndIsActiveTrue(anyList());
+        verify(userGenreRepository, never()).findByIdUserId(any());
     }
 
     @Test

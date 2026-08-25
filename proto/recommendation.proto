@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+// Contract between the Spring Boot backend and the Python recommendation service. Backend
+// generates Java stubs from this file via the protobuf Gradle plugin (backend/build.gradle);
+// the Python side's stubs are checked in under recommendation/generated/ and regenerated with
+// recommendation/scripts/generate_proto.sh whenever this file changes.
+package recommendation;
+
+option java_package = "com.movierec.backend.grpc.recommendation";
+option java_multiple_files = true;
+
+// FIX: this service is only ever called server-to-server by the Spring Boot backend, which
+// resolves user_id from the caller's JWT before making the request -- it must never be reachable
+// directly from a browser (see docker-compose.yml's loopback-only port binding and
+// RecommendationController's doc comment).
+service RecommendationService {
+  rpc GetColdStartRecommendations(ColdStartRequest) returns (ColdStartResponse);
+}
+
+message ColdStartRequest {
+  int64 user_id = 1;
+  int32 limit = 2;
+}
+
+message ColdStartResponse {
+  repeated MovieRecommendation recommendations = 1;
+}
+
+message MovieRecommendation {
+  int64 id = 1;
+  string title = 2;
+  string poster_url = 3;
+  double average_rating = 4;
+  repeated string genres = 5;
+  double match_score = 6;
+}

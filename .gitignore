@@ -18,6 +18,8 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
+# Generated from proto/recommendation.proto -- see recommendation/scripts/generate_proto.sh
+recommendation/generated/
 
 # Env / secrets
 .env

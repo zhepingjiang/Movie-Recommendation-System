@@ -3,3 +3,4 @@ uvicorn
 pandas
 scikit-learn
 psycopg2-binary
+grpcio
