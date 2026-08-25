@@ -54,7 +54,7 @@ class AuthControllerTest {
                         post("/api/auth/register")
                                 .contentType("application/json")
                                 .content(objectMapper.writeValueAsString(
-                                        new RegisterRequest("bob", "bob@example.com", "password123", Set.of("Action")))))
+                                        new RegisterRequest("Bob Jones", "bob@example.com", "password123", Set.of("Action")))))
                 .andExpect(status().isCreated())
                 .andExpect(cookie().exists("auth_token"))
                 .andExpect(cookie().httpOnly("auth_token", true))

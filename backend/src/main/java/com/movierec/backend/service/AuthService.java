@@ -17,7 +17,10 @@ import com.movierec.backend.repository.UserRepository;
 import com.movierec.backend.security.JwtService;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -34,6 +37,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AuthService {
 
+    // Matches the users.username column length (see User#username).
+    private static final int USERNAME_MAX_LENGTH = 100;
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -48,9 +54,6 @@ public class AuthService {
     // silently creating a genre-less account.
     @Transactional
     public AuthResult register(RegisterRequest request) {
-        if (userRepository.existsByUsername(request.username())) {
-            throw new DuplicateUserException("Username is already taken");
-        }
         if (userRepository.existsByEmail(request.email())) {
             throw new DuplicateUserException("Email is already registered");
         }
@@ -63,10 +66,10 @@ public class AuthService {
         Instant now = Instant.now();
         User user =
                 User.builder()
-                        .username(request.username())
+                        .username(generateUniqueUsername(request.fullName()))
                         .email(request.email())
                         .passwordHash(passwordEncoder.encode(request.password()))
-                        .displayName(request.username())
+                        .displayName(request.fullName())
                         .role(Role.USER)
                         .createdAt(now)
                         .updatedAt(now)
@@ -108,6 +111,37 @@ public class AuthService {
     // response. Now delegates to the one shared mapper both services use.
     private UserProfileDto toProfileDto(User user) {
         return userProfileMapper.toDto(user);
+    }
+
+    // FIX: the frontend no longer collects a username at all -- registration only asks for a
+    // full name, which becomes displayName verbatim. The login username is derived from it here
+    // ("John Michael Smith" -> "john.michael.smith") with a numeric suffix appended on collision
+    // ("john.smith", then "john.smith1", "john.smith2", ...), so every account still gets a
+    // stable, unique handle to log in with.
+    private String generateUniqueUsername(String fullName) {
+        String base = Arrays.stream(fullName.trim().toLowerCase(Locale.ROOT).split("\\s+"))
+                .map(part -> part.replaceAll("[^a-z0-9]", ""))
+                .filter(part -> !part.isEmpty())
+                .collect(Collectors.joining("."));
+        if (base.isEmpty()) {
+            base = "user";
+        }
+        if (base.length() > USERNAME_MAX_LENGTH) {
+            base = base.substring(0, USERNAME_MAX_LENGTH);
+        }
+        if (!userRepository.existsByUsername(base)) {
+            return base;
+        }
+
+        String candidateBase =
+                base.length() > USERNAME_MAX_LENGTH - 3 ? base.substring(0, USERNAME_MAX_LENGTH - 3) : base;
+        int suffix = 1;
+        String candidate;
+        do {
+            candidate = candidateBase + suffix;
+            suffix++;
+        } while (userRepository.existsByUsername(candidate));
+        return candidate;
     }
 
     /** Result of a successful register/login: the profile to return plus the JWT to cookie-ify. */

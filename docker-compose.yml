@@ -74,6 +74,11 @@ services:
       # not committed -- see recommendation/scripts/generate_proto.sh).
       context: .
       dockerfile: recommendation/Dockerfile
+    environment:
+      # FIX: db.py defaults DB_HOST to "localhost", which inside this container means itself,
+      # not the postgres container -- cold-start recommendations 500'd on every request until
+      # this was set (verified while testing the /register onboarding flow's step 3).
+      DB_HOST: postgres
     ports:
       # Loopback-only: the Spring Boot backend runs on the host (not in this compose file) and
       # calls this service directly, but it must never be reachable from outside the host --

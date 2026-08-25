@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
-type Mode = 'signin' | 'register';
-
 /**
- * Combined sign-in / registration page at `/login`. On success, redirects back to wherever the
- * user was headed before being sent here (see RequireAuth), or to the home page.
+ * Sign-in page at `/login`. On success, redirects back to wherever the user was headed before
+ * being sent here (see RequireAuth), or to the home page. New accounts are created via the
+ * `/register` onboarding wizard, not here — registration requires an initial genre pick that this
+ * single-form page has no room for.
  */
 export default function LoginPage() {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [mode, setMode] = useState<Mode>('signin');
   const [identifier, setIdentifier] = useState('');
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,18 +26,10 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      if (mode === 'signin') {
-        await login({ identifier, password });
-      } else {
-        await register({ username, email, password });
-      }
+      await login({ identifier, password });
       navigate(from, { replace: true });
     } catch {
-      setError(
-        mode === 'signin'
-          ? 'Invalid username/email or password.'
-          : 'Could not create an account. The username or email may already be taken.',
-      );
+      setError('Invalid username/email or password.');
     } finally {
       setLoading(false);
     }
@@ -51,55 +40,16 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[420px] flex-col px-6 py-20">
-      <div className="mb-8 flex gap-6 border-b border-white/10">
-        <button
-          type="button"
-          onClick={() => setMode('signin')}
-          className={`cursor-pointer pb-3 text-sm font-semibold ${
-            mode === 'signin' ? 'border-b-2 border-[#e50914] text-[#f2f2f2]' : 'text-[#888]'
-          }`}
-        >
-          Sign in
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('register')}
-          className={`cursor-pointer pb-3 text-sm font-semibold ${
-            mode === 'register' ? 'border-b-2 border-[#e50914] text-[#f2f2f2]' : 'text-[#888]'
-          }`}
-        >
-          Create account
-        </button>
-      </div>
+      <h1 className="mb-8 border-b border-white/10 pb-3 text-sm font-semibold text-[#f2f2f2]">Sign in</h1>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {mode === 'signin' ? (
-          <input
-            className={inputClass}
-            placeholder="Username or email"
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            required
-          />
-        ) : (
-          <>
-            <input
-              className={inputClass}
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-            <input
-              className={inputClass}
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </>
-        )}
+        <input
+          className={inputClass}
+          placeholder="Username or email"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          required
+        />
         <input
           className={inputClass}
           type="password"
@@ -117,9 +67,16 @@ export default function LoginPage() {
           disabled={loading}
           className="mt-2 cursor-pointer rounded-md bg-[#e50914] px-[26px] py-[11px] text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+          {loading ? 'Please wait…' : 'Sign in'}
         </button>
       </form>
+
+      <p className="mt-6 text-center text-sm text-[#888]">
+        Don't have an account?{' '}
+        <Link to="/register" className="text-[#f2f2f2] underline">
+          Create one
+        </Link>
+      </p>
     </div>
   );
 }

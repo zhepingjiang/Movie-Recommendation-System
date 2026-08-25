@@ -28,6 +28,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -68,10 +69,10 @@ class AuthServiceTest {
 
     @Test
     void registerCreatesUserWithUserRoleAndReturnsToken() {
-        RegisterRequest request = new RegisterRequest("bob", "bob@example.com", "password123", Set.of("Action"));
+        RegisterRequest request = new RegisterRequest("Bob Jones", "bob@example.com", "password123", Set.of("Action"));
         Genre action = genre(1L, "Action");
-        when(userRepository.existsByUsername("bob")).thenReturn(false);
         when(userRepository.existsByEmail("bob@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername("bob.jones")).thenReturn(false);
         when(genreRepository.findByNameInAndIsActiveTrue(Set.of("Action"))).thenReturn(List.of(action));
         when(passwordEncoder.encode("password123")).thenReturn("hashed-pw");
         when(userRepository.save(any(User.class)))
@@ -82,30 +83,49 @@ class AuthServiceTest {
                             return u;
                         });
         when(jwtService.generateToken(any(User.class))).thenReturn("jwt-token");
-        UserProfileDto profile =
-                new UserProfileDto(2L, "bob", "bob@example.com", "bob", null, Role.USER, Instant.now(), Set.of("Action"));
+        UserProfileDto profile = new UserProfileDto(
+                2L, "bob.jones", "bob@example.com", "Bob Jones", null, Role.USER, Instant.now(), Set.of("Action"));
         when(userProfileMapper.toDto(any(User.class))).thenReturn(profile);
 
         AuthService.AuthResult result = authService.register(request);
 
         assertThat(result.token()).isEqualTo("jwt-token");
-        assertThat(result.profile().username()).isEqualTo("bob");
+        assertThat(result.profile().username()).isEqualTo("bob.jones");
         assertThat(result.profile().role()).isEqualTo(Role.USER);
         assertThat(result.profile().preferredGenres()).containsExactly("Action");
+
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(savedUser.capture());
+        assertThat(savedUser.getValue().getUsername()).isEqualTo("bob.jones");
+        assertThat(savedUser.getValue().getDisplayName()).isEqualTo("Bob Jones");
     }
 
     @Test
-    void registerRejectsDuplicateUsername() {
-        RegisterRequest request = new RegisterRequest("alice", "new@example.com", "password123", Set.of("Action"));
-        when(userRepository.existsByUsername("alice")).thenReturn(true);
+    void registerAppendsIncrementingSuffixWhenGeneratedUsernameCollides() {
+        RegisterRequest request = new RegisterRequest("Alice Doe", "alice2@example.com", "password123", Set.of("Action"));
+        Genre action = genre(1L, "Action");
+        when(userRepository.existsByEmail("alice2@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername("alice.doe")).thenReturn(true);
+        when(userRepository.existsByUsername("alice.doe1")).thenReturn(true);
+        when(userRepository.existsByUsername("alice.doe2")).thenReturn(false);
+        when(genreRepository.findByNameInAndIsActiveTrue(Set.of("Action"))).thenReturn(List.of(action));
+        when(passwordEncoder.encode("password123")).thenReturn("hashed-pw");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(jwtService.generateToken(any(User.class))).thenReturn("jwt-token");
+        when(userProfileMapper.toDto(any(User.class)))
+                .thenReturn(new UserProfileDto(
+                        3L, "alice.doe2", "alice2@example.com", "Alice Doe", null, Role.USER, Instant.now(), Set.of("Action")));
 
-        assertThatThrownBy(() -> authService.register(request)).isInstanceOf(DuplicateUserException.class);
+        authService.register(request);
+
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(savedUser.capture());
+        assertThat(savedUser.getValue().getUsername()).isEqualTo("alice.doe2");
     }
 
     @Test
     void registerRejectsDuplicateEmail() {
-        RegisterRequest request = new RegisterRequest("newname", "alice@example.com", "password123", Set.of("Action"));
-        when(userRepository.existsByUsername("newname")).thenReturn(false);
+        RegisterRequest request = new RegisterRequest("New Name", "alice@example.com", "password123", Set.of("Action"));
         when(userRepository.existsByEmail("alice@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> authService.register(request)).isInstanceOf(DuplicateUserException.class);
@@ -113,8 +133,7 @@ class AuthServiceTest {
 
     @Test
     void registerRejectsWhenNoSubmittedGenreNameResolves() {
-        RegisterRequest request = new RegisterRequest("bob", "bob@example.com", "password123", Set.of("NotAGenre"));
-        when(userRepository.existsByUsername("bob")).thenReturn(false);
+        RegisterRequest request = new RegisterRequest("Bob Jones", "bob@example.com", "password123", Set.of("NotAGenre"));
         when(userRepository.existsByEmail("bob@example.com")).thenReturn(false);
         when(genreRepository.findByNameInAndIsActiveTrue(Set.of("NotAGenre"))).thenReturn(List.of());
 

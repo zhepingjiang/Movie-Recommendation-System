@@ -14,9 +14,13 @@ import java.util.Set;
  * existed. The onboarding flow now requires at least one genre pick to complete registration at
  * all, so the frontend collects both steps' data before calling this endpoint once, and no
  * partial (genre-less) account is ever created.
+ *
+ * <p>{@code fullName} is a display name only; the login {@code username} is generated server-side
+ * from it (see {@link com.movierec.backend.service.AuthService#register}) since the frontend never
+ * collects one directly.
  */
 public record RegisterRequest(
-        @NotBlank @Size(min = 3, max = 100) String username,
+        @NotBlank @Size(max = 150) String fullName,
         @NotBlank @Email @Size(max = 255) String email,
         @NotBlank @Size(min = 8, max = 72) String password,
         @NotEmpty Set<String> genres) {}

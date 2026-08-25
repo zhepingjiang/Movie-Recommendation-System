@@ -49,3 +49,29 @@ export function fetchGenres(): Promise<string[]> {
 export function fetchTrending(limit: number): Promise<TrendingEntry[]> {
   return getJson<TrendingEntry[]>('/api/trending', { limit });
 }
+
+// Raw shape of a single entry from GET /api/recommendations/cold-start. Field names are
+// snake_case because the backend DTO reuses its gRPC-facing @JsonProperty annotations for the
+// HTTP response too (see MovieRecommendationDto on the backend).
+interface ColdStartRecommendation {
+  id: number;
+  title: string;
+  poster_url: string | null;
+  average_rating: number;
+  genres: string[];
+  match_score: number;
+}
+
+export async function fetchColdStartRecommendations(limit: number): Promise<Movie[]> {
+  const recommendations = await getJson<ColdStartRecommendation[]>('/api/recommendations/cold-start', { limit });
+  return recommendations.map((rec) => ({
+    id: rec.id,
+    title: rec.title,
+    posterUrl: rec.poster_url,
+    description: null,
+    releaseDate: null,
+    durationMin: null,
+    averageRating: rec.average_rating,
+    genres: rec.genres,
+  }));
+}

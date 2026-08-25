@@ -8,12 +8,14 @@ export interface UserProfile {
   avatarUrl: string | null;
   role: UserRole;
   createdAt: string;
+  preferredGenres: string[];
 }
 
 export interface RegisterPayload {
-  username: string;
+  fullName: string;
   email: string;
   password: string;
+  genres: string[];
 }
 
 export interface LoginPayload {
