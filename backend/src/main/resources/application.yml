@@ -54,3 +54,11 @@ minio:
   access-key: ${MINIO_ACCESS_KEY:minioadmin}
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
   bucket: ${MINIO_BUCKET:avatars}
+
+recommendation:
+  service:
+    # FIX: the Python recommendation service must never be called directly by the browser (it has
+    # no auth of its own) — only this backend calls it, server-to-server, after resolving the
+    # caller's identity from the JWT. Port 8000 is published to the host (not the docker network)
+    # because this backend itself runs on the host rather than in docker-compose.
+    url: ${RECOMMENDATION_SERVICE_URL:http://localhost:8000}

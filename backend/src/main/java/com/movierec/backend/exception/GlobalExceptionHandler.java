@@ -38,6 +38,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
     }
 
+    @ExceptionHandler(InvalidGenreSelectionException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidGenreSelection(
+            InvalidGenreSelectionException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request);

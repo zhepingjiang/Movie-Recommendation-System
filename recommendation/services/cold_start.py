@@ -45,6 +45,11 @@ def get_cold_start_recommendations(user_id: int, limit: int = 10) -> list[dict]:
         cursor.execute(_MOVIES_WITH_GENRES_SQL)
         movies = cursor.fetchall()
 
+    # TODO: rating_count is fetched but not used in scoring. It's meant to eventually support
+    # Bayesian-smoothed ranking (so a movie with 1 rating of 9.0 can't outrank one with 5,000
+    # ratings averaging 8.2), but every movie's rating_count is currently 0 -- nothing in this repo
+    # writes to it yet -- so applying that smoothing today would collapse every movie to the same
+    # score instead of fixing anything. Revisit once real in-app ratings start populating it.
     scored = []
     for movie in movies:
         movie_genres = set(movie["genres"])
