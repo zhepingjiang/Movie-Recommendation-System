@@ -47,9 +47,16 @@ export default function RegisterExplorePage() {
       <OnboardingHeader currentStep={3} />
 
       <main className="flex flex-1 flex-col items-center px-6 pt-12 pb-20">
-        <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full border-[1.5px] border-[#4ade80] bg-[#4ade80]/10">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
-            <polyline points="20 6 9 17 4 12" />
+        <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-[#4ade80]/10">
+          <svg viewBox="0 0 64 64" fill="none" stroke="#4ade80" strokeLinecap="round" strokeLinejoin="round" className="h-16 w-16">
+            {/* Path (not <circle>) so the sweep flag can force counter-clockwise drawing */}
+            <path
+              className="checkmark-circle"
+              d="M 63.25 32 A 31.25 31.25 0 1 0 0.75 32 A 31.25 31.25 0 1 0 63.25 32"
+              strokeWidth={1.5}
+              pathLength={1}
+            />
+            <polyline className="checkmark-tick" points="22.7 32 28.5 37.8 41.3 25" strokeWidth={3.5} pathLength={1} />
           </svg>
         </div>
 

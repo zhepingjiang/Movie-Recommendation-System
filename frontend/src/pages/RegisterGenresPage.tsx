@@ -21,6 +21,12 @@ const GENRE_POSTERS: Record<string, string> = {
   Fantasy: 'https://image.tmdb.org/t/p/w500/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg',
   Crime: 'https://image.tmdb.org/t/p/w500/3bhkrj58Vtu7enYsRolD1fZdja1.jpg',
   Mystery: 'https://image.tmdb.org/t/p/w500/mGWOmj2jHFol3kOGNv1EhbSDDE1.jpg',
+  Family: 'https://image.tmdb.org/t/p/w500/sKCr78MXSLixwmZ8DyJLrpMsd15.jpg',
+  History: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg',
+  Music: 'https://image.tmdb.org/t/p/w500/zm0KAbOjlt9eR5y7vDiL2dEOwMl.jpg',
+  'TV Movie': 'https://image.tmdb.org/t/p/w500/xdhLAADGSse8KCrsDLBuM5b68Cg.jpg',
+  War: 'https://image.tmdb.org/t/p/w500/kzRAd7mj39ZY3FGNrDdZjqx56tn.jpg',
+  Western: 'https://image.tmdb.org/t/p/w500/gmmCh2BvTKp0YGT2FYG0eOQJELi.jpg',
 };
 
 const PLACEHOLDER_POSTER =

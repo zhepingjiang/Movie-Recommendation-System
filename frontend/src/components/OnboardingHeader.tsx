@@ -18,23 +18,27 @@ export default function OnboardingHeader({ currentStep }: OnboardingHeaderProps)
         CINEMIND
       </Link>
       <div className="flex items-center gap-2" aria-label="Onboarding progress">
-        {STEPS.map(({ step, label }, i) => (
-          <div key={step} className="flex items-center gap-2">
-            {i > 0 && <div className="h-px w-9 bg-[#262626]" />}
-            <div
-              title={`Step ${step}: ${label}`}
-              className={`flex h-[26px] w-[26px] items-center justify-center rounded-full border text-xs ${
-                step < currentStep
-                  ? 'border-[#e50914] bg-[#e50914] text-white'
-                  : step === currentStep
-                    ? 'border-[#e50914] bg-[#e50914]/20 text-[#f5f5f5]'
-                    : 'border-[#262626] text-[#a3a3a3]'
-              }`}
-            >
-              {step < currentStep ? '✓' : step}
+        {STEPS.map(({ step, label }, i) => {
+          const isLastStep = step === STEPS.length;
+          const isDone = step < currentStep || (step === currentStep && isLastStep);
+          return (
+            <div key={step} className="flex items-center gap-2">
+              {i > 0 && <div className="h-px w-9 bg-[#262626]" />}
+              <div
+                title={`Step ${step}: ${label}`}
+                className={`flex h-[26px] w-[26px] items-center justify-center rounded-full border text-xs ${
+                  isDone
+                    ? 'border-[#e50914] bg-[#e50914] text-white'
+                    : step === currentStep
+                      ? 'border-[#e50914] bg-[#e50914]/20 text-[#f5f5f5]'
+                      : 'border-[#262626] text-[#a3a3a3]'
+                }`}
+              >
+                {isDone ? '✓' : step}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </header>
   );
