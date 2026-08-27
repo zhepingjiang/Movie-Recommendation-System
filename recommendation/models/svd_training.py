@@ -4,13 +4,16 @@ Combines our own explicit ratings (small: this app has under 30 users) with the 
 ml-latest-small dataset so matrix factorization has enough signal to be meaningful, trains a
 Surprise SVD model, and writes each real user's top candidates to Redis.
 
+The MovieLens side is read pre-joined from MinIO (see models/movielens_ingest.py) rather than
+from the raw CSVs directly -- that's a one-time ingest job, run separately, so this script never
+touches the filesystem and can run on any machine/container that can reach postgres/minio/redis.
+
 Not part of the request path -- triggered manually via recommendation/scripts/train_svd.py.
 user_events (implicit signals) are intentionally not used yet; Surprise's SVD wants an explicit
 1-5 rating, and view/click/watchlist counts don't have a natural value on that scale. Revisit with
 a separate implicit-feedback pass later.
 """
 
-import csv
 import os
 from collections import defaultdict
 
@@ -18,15 +21,11 @@ import redis
 from surprise import SVD, Dataset, Reader
 
 from db import get_cursor
-
-ML_DATASET_DIR = os.environ.get("ML_DATASET_DIR", r"C:\Users\zhepi\Downloads\ml-latest-small\ml-latest-small")
-ML_RATINGS_CSV = os.path.join(ML_DATASET_DIR, "ratings.csv")
-ML_LINKS_CSV = os.path.join(ML_DATASET_DIR, "links.csv")
+from models.movielens_ingest import RATING_SCALE, fetch_ratings_dataframe
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
-RATING_SCALE = (1, 5)
 TOP_N = 10
 REDIS_STORE_N = 6
 
@@ -34,7 +33,6 @@ _PG_PREFIX = "pg:"
 _ML_PREFIX = "ml:"
 
 _PG_RATINGS_SQL = "SELECT user_id, movie_id, score FROM ratings"
-_MOVIE_TMDB_IDS_SQL = "SELECT id, tmdb_id FROM movies WHERE tmdb_id IS NOT NULL"
 _ALL_MOVIE_IDS_SQL = "SELECT id FROM movies"
 
 
@@ -49,26 +47,11 @@ def ml_uid(user_id) -> str:
     return f"{_ML_PREFIX}{user_id}"
 
 
-def round_ml_rating(raw: float) -> int:
-    """MovieLens ratings are 0.5-5.0 in half-point steps; our scale is integer 1-5. Python's
-    round() is already half-even (banker's rounding) for exact .5 values, which is what we want
-    for 1.5/2.5/3.5/4.5. The one edge case is 0.5, which rounds down to 0 and falls outside the
-    scale -- clamped up to 1."""
-    return max(round(raw), RATING_SCALE[0])
-
-
 def load_postgres_ratings() -> list[tuple[str, int, int]]:
     with get_cursor() as cursor:
         cursor.execute(_PG_RATINGS_SQL)
         rows = cursor.fetchall()
     return [(pg_uid(r["user_id"]), r["movie_id"], int(r["score"])) for r in rows]
-
-
-def load_tmdb_to_movie_id() -> dict[str, int]:
-    with get_cursor() as cursor:
-        cursor.execute(_MOVIE_TMDB_IDS_SQL)
-        rows = cursor.fetchall()
-    return {str(r["tmdb_id"]): r["id"] for r in rows}
 
 
 def load_all_movie_ids() -> list[int]:
@@ -78,34 +61,14 @@ def load_all_movie_ids() -> list[int]:
     return [r["id"] for r in rows]
 
 
-def load_ml_movie_to_tmdb() -> dict[str, str]:
-    mapping = {}
-    with open(ML_LINKS_CSV, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            tmdb_id = row["tmdbId"].strip()
-            if tmdb_id:
-                mapping[row["movieId"]] = tmdb_id
-    return mapping
-
-
-def load_movielens_ratings(
-    ml_movie_to_tmdb: dict[str, str], tmdb_to_movie_id: dict[str, int]
-) -> tuple[list[tuple[str, int, int]], int]:
-    """Returns (ratings, skipped_count). Rows are skipped when the MovieLens movie has no tmdbId,
-    or that tmdbId doesn't resolve to a postgres movie (dead/merged TMDb ids -- see the backfill
-    script's not_found count)."""
-    ratings = []
-    skipped = 0
-    with open(ML_RATINGS_CSV, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            tmdb_id = ml_movie_to_tmdb.get(row["movieId"])
-            movie_id = tmdb_to_movie_id.get(tmdb_id) if tmdb_id else None
-            if movie_id is None:
-                skipped += 1
-                continue
-            score = round_ml_rating(float(row["rating"]))
-            ratings.append((ml_uid(row["userId"]), movie_id, score))
-    return ratings, skipped
+def load_movielens_ratings() -> list[tuple[str, int, int]]:
+    """Reads the pre-joined (movieId -> postgres movie id already resolved, ratings already
+    rounded to our 1-5 scale) dataset built by models/movielens_ingest.py."""
+    df = fetch_ratings_dataframe()
+    return [
+        (ml_uid(int(row.ml_user_id)), int(row.movie_id), int(row.rating))
+        for row in df.itertuples(index=False)
+    ]
 
 
 def build_trainset(rows: list[tuple[str, int, int]]):
@@ -166,12 +129,10 @@ def run() -> None:
     pg_users = {u for u, _, _ in pg_ratings}
     print(f"  {len(pg_ratings)} ratings from {len(pg_users)} real users")
 
-    print("Loading MovieLens ratings...")
-    ml_movie_to_tmdb = load_ml_movie_to_tmdb()
-    tmdb_to_movie_id = load_tmdb_to_movie_id()
-    ml_ratings, skipped = load_movielens_ratings(ml_movie_to_tmdb, tmdb_to_movie_id)
+    print("Loading MovieLens ratings from MinIO...")
+    ml_ratings = load_movielens_ratings()
     ml_users = {u for u, _, _ in ml_ratings}
-    print(f"  {len(ml_ratings)} ratings from {len(ml_users)} MovieLens users ({skipped} rows skipped, no matching postgres movie)")
+    print(f"  {len(ml_ratings)} ratings from {len(ml_users)} MovieLens users")
 
     all_rows = pg_ratings + ml_ratings
     if not all_rows:

@@ -6,3 +6,5 @@ psycopg2-binary
 grpcio
 scikit-surprise
 redis
+minio
+pyarrow
