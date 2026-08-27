@@ -12,18 +12,14 @@ import io
 import os
 
 import pandas as pd
-from minio import Minio
 
 from db import get_cursor
+from minio_client import ensure_bucket, get_minio_client
 
 ML_DATASET_DIR = os.environ.get("ML_DATASET_DIR", r"C:\Users\zhepi\Downloads\ml-latest-small\ml-latest-small")
 ML_RATINGS_CSV = os.path.join(ML_DATASET_DIR, "ratings.csv")
 ML_LINKS_CSV = os.path.join(ML_DATASET_DIR, "links.csv")
 
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
-MINIO_SECURE = os.environ.get("MINIO_SECURE", "false").lower() == "true"
 MINIO_ML_BUCKET = os.environ.get("MINIO_ML_BUCKET", "ml-training-data")
 MINIO_ML_OBJECT_KEY = os.environ.get("MINIO_ML_OBJECT_KEY", "movielens/ml-latest-small/ratings.parquet")
 
@@ -76,20 +72,6 @@ def build_translated_ratings(
             )
     df = pd.DataFrame(rows, columns=["ml_user_id", "movie_id", "rating"])
     return df, skipped
-
-
-def get_minio_client() -> Minio:
-    return Minio(
-        MINIO_ENDPOINT,
-        access_key=MINIO_ACCESS_KEY,
-        secret_key=MINIO_SECRET_KEY,
-        secure=MINIO_SECURE,
-    )
-
-
-def ensure_bucket(client: Minio, bucket: str) -> None:
-    if not client.bucket_exists(bucket):
-        client.make_bucket(bucket)
 
 
 def upload_dataframe(df: pd.DataFrame) -> None:

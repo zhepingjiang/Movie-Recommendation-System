@@ -2,7 +2,11 @@
 
 Combines our own explicit ratings (small: this app has under 30 users) with the MovieLens
 ml-latest-small dataset so matrix factorization has enough signal to be meaningful, trains a
-Surprise SVD model, and writes each real user's top candidates to Redis.
+Surprise SVD model, and persists each real user's top candidates to Postgres (source of truth,
+read by the backend's recommendation_cache table) and Redis (hot-path cache the size of what's
+actually shown before a "view all"). The trained model and the full per-run recommendation
+snapshot are also archived to MinIO for history/rollback -- Postgres only ever holds the latest
+run's rows per model_version.
 
 The MovieLens side is read pre-joined from MinIO (see models/movielens_ingest.py) rather than
 from the raw CSVs directly -- that's a one-time ingest job, run separately, so this script never
@@ -14,21 +18,34 @@ user_events (implicit signals) are intentionally not used yet; Surprise's SVD wa
 a separate implicit-feedback pass later.
 """
 
+import io
 import os
+import pickle
 from collections import defaultdict
+from datetime import datetime, timezone
 
+import pandas as pd
 import redis
+from psycopg2.extras import execute_values
 from surprise import SVD, Dataset, Reader
 from surprise.model_selection import GridSearchCV, cross_validate
 
 from db import get_cursor
+from minio_client import ensure_bucket, get_minio_client
 from models.movielens_ingest import RATING_SCALE, fetch_ratings_dataframe
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+MINIO_SVD_BUCKET = os.environ.get("MINIO_SVD_BUCKET", "svd-artifacts")
 
-TOP_N = 10
-REDIS_STORE_N = 6
+MODEL_VERSION = "svd_v1"
+
+# How many candidates to compute/persist (Postgres + MinIO) vs. how many to cache in Redis for
+# the collapsed homepage row -- a future "view all" page reads the larger set straight from
+# Postgres, since it's not on the hot path and doesn't need cache-speed reads.
+PERSIST_N = 50
+REDIS_STORE_N = 10
+
 CV_FOLDS = 5
 # Small grid on purpose -- this is a manually-triggered offline job (not on the request path),
 # so we keep grid search (8 combos x CV_FOLDS fits) fast rather than exhaustive.
@@ -43,6 +60,11 @@ _ML_PREFIX = "ml:"
 
 _PG_RATINGS_SQL = "SELECT user_id, movie_id, score FROM ratings"
 _ALL_MOVIE_IDS_SQL = "SELECT id FROM movies"
+_DELETE_RECOMMENDATION_CACHE_SQL = "DELETE FROM recommendation_cache WHERE model_version = %s"
+_INSERT_RECOMMENDATION_CACHE_SQL = """
+    INSERT INTO recommendation_cache (user_id, movie_id, model_version, score, generated_at)
+    VALUES %s
+"""
 
 
 def pg_uid(user_id) -> str:
@@ -81,8 +103,6 @@ def load_movielens_ratings() -> list[tuple[str, int, int]]:
 
 
 def build_dataset(rows: list[tuple[str, int, int]]) -> Dataset:
-    import pandas as pd
-
     reader = Reader(rating_scale=RATING_SCALE)
     df = pd.DataFrame(rows, columns=["user", "item", "rating"])
     return Dataset.load_from_df(df, reader)
@@ -118,6 +138,23 @@ def train_model(trainset, params: dict) -> SVD:
     return algo
 
 
+def save_model_to_minio(algo: SVD, run_id: str) -> None:
+    """Archives the fitted model under both a timestamped key (history/rollback) and a
+    fixed "latest" key (convenience) -- Postgres/Redis only ever hold this run's recommendation
+    output, so MinIO is the only place the model itself survives past a single run."""
+    payload = pickle.dumps(algo)
+    client = get_minio_client()
+    ensure_bucket(client, MINIO_SVD_BUCKET)
+    for key in (f"models/{run_id}/model.pkl", "models/latest/model.pkl"):
+        client.put_object(
+            MINIO_SVD_BUCKET,
+            key,
+            data=io.BytesIO(payload),
+            length=len(payload),
+            content_type="application/octet-stream",
+        )
+
+
 def rated_movies_by_pg_user(pg_ratings: list[tuple[str, int, int]]) -> dict[str, set[int]]:
     rated = defaultdict(set)
     for uid, movie_id, _ in pg_ratings:
@@ -126,7 +163,7 @@ def rated_movies_by_pg_user(pg_ratings: list[tuple[str, int, int]]) -> dict[str,
 
 
 def generate_top_n(
-    algo: SVD, rated_by_user: dict[str, set[int]], all_movie_ids: list[int], n: int = TOP_N
+    algo: SVD, rated_by_user: dict[str, set[int]], all_movie_ids: list[int], n: int = PERSIST_N
 ) -> dict[str, list[tuple[int, float]]]:
     """Only called for pg:-namespaced users (real accounts with at least one rating) -- MovieLens's
     synthetic users contribute to training but never get anything generated for them."""
@@ -153,6 +190,49 @@ def write_recommendations_to_redis(
             client.rpush(key, *movie_ids)
         written += 1
     return written
+
+
+def save_recommendations_to_minio(top_n_by_user: dict[str, list[tuple[int, float]]], run_id: str) -> None:
+    """Archives this run's full per-user candidate list -- the historical record Postgres
+    intentionally doesn't keep, since Postgres only holds the latest run per model_version."""
+    rows = [
+        (uid, movie_id, score)
+        for uid, predictions in top_n_by_user.items()
+        for movie_id, score in predictions
+    ]
+    df = pd.DataFrame(rows, columns=["user_id", "movie_id", "score"])
+    buffer = io.BytesIO()
+    df.to_parquet(buffer, engine="pyarrow", index=False)
+    size = buffer.tell()
+    buffer.seek(0)
+
+    client = get_minio_client()
+    ensure_bucket(client, MINIO_SVD_BUCKET)
+    client.put_object(
+        MINIO_SVD_BUCKET,
+        f"recommendations/{run_id}/topk.parquet",
+        data=buffer,
+        length=size,
+        content_type="application/octet-stream",
+    )
+
+
+def write_recommendations_to_postgres(
+    top_n_by_user: dict[str, list[tuple[int, float]]], model_version: str, generated_at: datetime
+) -> int:
+    """Replaces every row for this model_version with the current run's top-N per user. A plain
+    upsert isn't enough: a movie that fell out of this run's top-N would otherwise linger forever
+    from a previous run, since the table's PK is (user_id, movie_id, model_version)."""
+    rows = [
+        (int(uid[len(_PG_PREFIX):]), movie_id, model_version, score, generated_at)
+        for uid, predictions in top_n_by_user.items()
+        for movie_id, score in predictions
+    ]
+    with get_cursor() as cursor:
+        cursor.execute(_DELETE_RECOMMENDATION_CACHE_SQL, (model_version,))
+        if rows:
+            execute_values(cursor, _INSERT_RECOMMENDATION_CACHE_SQL, rows)
+    return len(rows)
 
 
 def run() -> None:
@@ -184,17 +264,29 @@ def run() -> None:
     print(f"  Tuned CV RMSE: {tuned_metrics['rmse']:.4f}, MAE: {tuned_metrics['mae']:.4f}")
     # --- end hyperparameter tuning ---
 
-    print(f"Training SVD on {len(all_rows)} total ratings with tuned hyperparameters...")
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    print(f"Training SVD on {len(all_rows)} total ratings with tuned hyperparameters (run {run_id})...")
     algo = train_model(data.build_full_trainset(), best_params)
+
+    print("Archiving trained model to MinIO...")
+    save_model_to_minio(algo, run_id)
 
     if not pg_ratings:
         print("No real users have any ratings yet -- nothing to generate recommendations for.")
         return
 
     rated_by_user = rated_movies_by_pg_user(pg_ratings)
-    print(f"Generating top-{TOP_N} candidates for {len(rated_by_user)} real users...")
+    print(f"Generating top-{PERSIST_N} candidates for {len(rated_by_user)} real users...")
     all_movie_ids = load_all_movie_ids()
     top_n = generate_top_n(algo, rated_by_user, all_movie_ids)
+
+    print(f"Archiving top-{PERSIST_N} recommendation snapshot to MinIO...")
+    save_recommendations_to_minio(top_n, run_id)
+
+    print(f"Persisting top-{PERSIST_N} recommendations to Postgres (model_version={MODEL_VERSION})...")
+    generated_at = datetime.now(timezone.utc)
+    persisted = write_recommendations_to_postgres(top_n, MODEL_VERSION, generated_at)
+    print(f"  Persisted {persisted} rows.")
 
     written = write_recommendations_to_redis(top_n)
     print(f"Wrote recommendations for {written} users to Redis (top {REDIS_STORE_N} each, key format user:{{id}}:recommendations).")
