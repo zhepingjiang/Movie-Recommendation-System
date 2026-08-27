@@ -19,6 +19,7 @@ from collections import defaultdict
 
 import redis
 from surprise import SVD, Dataset, Reader
+from surprise.model_selection import GridSearchCV, cross_validate
 
 from db import get_cursor
 from models.movielens_ingest import RATING_SCALE, fetch_ratings_dataframe
@@ -28,6 +29,14 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
 TOP_N = 10
 REDIS_STORE_N = 6
+CV_FOLDS = 5
+# Small grid on purpose -- this is a manually-triggered offline job (not on the request path),
+# so we keep grid search (8 combos x CV_FOLDS fits) fast rather than exhaustive.
+SVD_PARAM_GRID = {
+    "n_factors": [50, 100],
+    "n_epochs": [20, 30],
+    "reg_all": [0.02, 0.1],
+}
 
 _PG_PREFIX = "pg:"
 _ML_PREFIX = "ml:"
@@ -71,17 +80,40 @@ def load_movielens_ratings() -> list[tuple[str, int, int]]:
     ]
 
 
-def build_trainset(rows: list[tuple[str, int, int]]):
+def build_dataset(rows: list[tuple[str, int, int]]) -> Dataset:
     import pandas as pd
 
     reader = Reader(rating_scale=RATING_SCALE)
     df = pd.DataFrame(rows, columns=["user", "item", "rating"])
-    data = Dataset.load_from_df(df, reader)
-    return data.build_full_trainset()
+    return Dataset.load_from_df(df, reader)
 
 
-def train_model(trainset) -> SVD:
-    algo = SVD()
+def evaluate_model(data: Dataset, params: dict | None = None, cv: int = CV_FOLDS) -> dict[str, float]:
+    """K-fold CV estimate of generalization error for the given SVD hyperparameters (Surprise's
+    defaults if none given). Observability only -- doesn't gate training or Redis writes."""
+    results = cross_validate(SVD(**(params or {})), data, measures=["RMSE", "MAE"], cv=cv, verbose=False)
+    return {
+        "rmse": float(results["test_rmse"].mean()),
+        "mae": float(results["test_mae"].mean()),
+    }
+
+
+# --- Hyperparameter tuning ---
+# Same k-fold CV as evaluate_model, but instead of just reporting a metric, grid search picks the
+# n_factors/n_epochs/reg_all combo that *minimizes* CV RMSE across SVD_PARAM_GRID. This is the
+# step that acts on what CV reveals about overfitting (e.g. preferring stronger reg_all when it
+# generalizes better) rather than just measuring it.
+def tune_hyperparameters(data: Dataset, cv: int = CV_FOLDS) -> tuple[dict, dict[str, float]]:
+    grid_search = GridSearchCV(SVD, SVD_PARAM_GRID, measures=["rmse", "mae"], cv=cv)
+    grid_search.fit(data)
+    best_params = grid_search.best_params["rmse"]
+    best_score = {"rmse": float(grid_search.best_score["rmse"]), "mae": float(grid_search.best_score["mae"])}
+    return best_params, best_score
+# --- end hyperparameter tuning ---
+
+
+def train_model(trainset, params: dict) -> SVD:
+    algo = SVD(**params)
     algo.fit(trainset)
     return algo
 
@@ -139,9 +171,21 @@ def run() -> None:
         print("No ratings available from either source -- nothing to train on.")
         return
 
-    print(f"Training SVD on {len(all_rows)} total ratings...")
-    trainset = build_trainset(all_rows)
-    algo = train_model(trainset)
+    data = build_dataset(all_rows)
+
+    print(f"Evaluating default SVD hyperparameters with {CV_FOLDS}-fold cross-validation...")
+    baseline_metrics = evaluate_model(data)
+    print(f"  Baseline CV RMSE: {baseline_metrics['rmse']:.4f}, MAE: {baseline_metrics['mae']:.4f}")
+
+    # --- Hyperparameter tuning: grid search over SVD_PARAM_GRID, picks whatever minimizes CV RMSE ---
+    print(f"Tuning SVD hyperparameters via grid search ({CV_FOLDS}-fold CV)...")
+    best_params, tuned_metrics = tune_hyperparameters(data)
+    print(f"  Best params: {best_params}")
+    print(f"  Tuned CV RMSE: {tuned_metrics['rmse']:.4f}, MAE: {tuned_metrics['mae']:.4f}")
+    # --- end hyperparameter tuning ---
+
+    print(f"Training SVD on {len(all_rows)} total ratings with tuned hyperparameters...")
+    algo = train_model(data.build_full_trainset(), best_params)
 
     if not pg_ratings:
         print("No real users have any ratings yet -- nothing to generate recommendations for.")
