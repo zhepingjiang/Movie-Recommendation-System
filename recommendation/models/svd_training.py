@@ -2,15 +2,15 @@
 
 Combines our own explicit ratings (small: this app has under 30 users) with the MovieLens
 ml-latest-small dataset so matrix factorization has enough signal to be meaningful, trains a
-Surprise SVD model, and persists each real user's top candidates to Postgres (source of truth,
-read by the backend's recommendation_cache table) and Redis (hot-path cache the size of what's
-actually shown before a "view all"). The trained model and the full per-run recommendation
-snapshot are also archived to MinIO for history/rollback -- Postgres only ever holds the latest
-run's rows per model_version.
+Surprise SVD model, and persists each real user's top candidates to Postgres's
+recommendation_cache table -- the backend reads it directly (joined with movie details) to serve
+personalized recommendations, so there's no separate serving-side cache to keep in sync. The
+trained model and the full per-run recommendation snapshot are also archived to MinIO for
+history/rollback -- Postgres only ever holds the latest run's rows per model_version.
 
 The MovieLens side is read pre-joined from MinIO (see models/movielens_ingest.py) rather than
 from the raw CSVs directly -- that's a one-time ingest job, run separately, so this script never
-touches the filesystem and can run on any machine/container that can reach postgres/minio/redis.
+touches the filesystem and can run on any machine/container that can reach postgres/minio.
 
 Not part of the request path -- triggered manually via recommendation/scripts/train_svd.py.
 user_events (implicit signals) are intentionally not used yet; Surprise's SVD wants an explicit
@@ -25,7 +25,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import pandas as pd
-import redis
 from psycopg2.extras import execute_values
 from surprise import SVD, Dataset, Reader
 from surprise.model_selection import GridSearchCV, cross_validate
@@ -34,17 +33,14 @@ from db import get_cursor
 from minio_client import ensure_bucket, get_minio_client
 from models.movielens_ingest import RATING_SCALE, fetch_ratings_dataframe
 
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 MINIO_SVD_BUCKET = os.environ.get("MINIO_SVD_BUCKET", "svd-artifacts")
 
 MODEL_VERSION = "svd_v1"
 
-# How many candidates to compute/persist (Postgres + MinIO) vs. how many to cache in Redis for
-# the collapsed homepage row -- a future "view all" page reads the larger set straight from
-# Postgres, since it's not on the hot path and doesn't need cache-speed reads.
+# How many candidates to compute/persist to Postgres + MinIO -- the backend queries this
+# directly (see RecommendationCacheRepository), so this is also the ceiling on how many
+# recommendations a single model_version can ever serve, e.g. for a future "view all" page.
 PERSIST_N = 50
-REDIS_STORE_N = 10
 
 CV_FOLDS = 5
 # Small grid on purpose -- this is a manually-triggered offline job (not on the request path),
@@ -170,26 +166,13 @@ def generate_top_n(
     results = {}
     for uid, rated in rated_by_user.items():
         candidates = [m for m in all_movie_ids if m not in rated]
-        predictions = [(movie_id, algo.predict(uid, movie_id).est) for movie_id in candidates]
+        # .est is numpy.float64 -- cast to plain float so it adapts correctly for psycopg2
+        # (numpy 2.x's repr() is "np.float64(...)", which execute_values would otherwise
+        # inline as invalid SQL rather than a numeric literal).
+        predictions = [(movie_id, float(algo.predict(uid, movie_id).est)) for movie_id in candidates]
         predictions.sort(key=lambda p: p[1], reverse=True)
         results[uid] = predictions[:n]
     return results
-
-
-def write_recommendations_to_redis(
-    top_n_by_user: dict[str, list[tuple[int, float]]], store_n: int = REDIS_STORE_N
-) -> int:
-    client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-    written = 0
-    for uid, predictions in top_n_by_user.items():
-        real_user_id = uid[len(_PG_PREFIX):]
-        key = f"user:{real_user_id}:recommendations"
-        movie_ids = [str(movie_id) for movie_id, _ in predictions[:store_n]]
-        client.delete(key)
-        if movie_ids:
-            client.rpush(key, *movie_ids)
-        written += 1
-    return written
 
 
 def save_recommendations_to_minio(top_n_by_user: dict[str, list[tuple[int, float]]], run_id: str) -> None:
@@ -287,6 +270,3 @@ def run() -> None:
     generated_at = datetime.now(timezone.utc)
     persisted = write_recommendations_to_postgres(top_n, MODEL_VERSION, generated_at)
     print(f"  Persisted {persisted} rows.")
-
-    written = write_recommendations_to_redis(top_n)
-    print(f"Wrote recommendations for {written} users to Redis (top {REDIS_STORE_N} each, key format user:{{id}}:recommendations).")

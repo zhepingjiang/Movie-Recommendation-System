@@ -1,6 +1,6 @@
 """Orchestration tests for models/svd_training.py's run().
 
-These mock every collaborator run() calls (postgres/MinIO/Redis boundaries, and the SVD
+These mock every collaborator run() calls (postgres/MinIO boundaries, and the SVD
 build/evaluate/tune/train/generate steps) to verify the wiring -- branching on empty data,
 and threading tuned hyperparameters, the run id, and trainset/algo objects through in the right
 order -- without hitting real services or doing actual SVD training.
@@ -33,7 +33,6 @@ def _patch_run_dependencies(monkeypatch, *, pg_ratings, ml_ratings, all_movie_id
         "generate_top_n": MagicMock(return_value={}),
         "save_recommendations_to_minio": MagicMock(return_value=None),
         "write_recommendations_to_postgres": MagicMock(return_value=0),
-        "write_recommendations_to_redis": MagicMock(return_value=0),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(svd_training, name, mock)
@@ -52,7 +51,6 @@ def test_run_returns_early_when_no_ratings_from_either_source(monkeypatch, capsy
     mocks["save_model_to_minio"].assert_not_called()
     mocks["save_recommendations_to_minio"].assert_not_called()
     mocks["write_recommendations_to_postgres"].assert_not_called()
-    mocks["write_recommendations_to_redis"].assert_not_called()
     assert "nothing to train on" in capsys.readouterr().out
 
 
@@ -78,7 +76,6 @@ def test_run_trains_but_skips_recommendations_when_no_real_users(monkeypatch):
     mocks["generate_top_n"].assert_not_called()
     mocks["save_recommendations_to_minio"].assert_not_called()
     mocks["write_recommendations_to_postgres"].assert_not_called()
-    mocks["write_recommendations_to_redis"].assert_not_called()
 
 
 def test_run_full_happy_path_wires_tuned_params_and_persists_everywhere(monkeypatch):
@@ -91,7 +88,6 @@ def test_run_full_happy_path_wires_tuned_params_and_persists_everywhere(monkeypa
     mocks["rated_movies_by_pg_user"].return_value = {"pg:1": {10}, "pg:2": {11}}
     mocks["generate_top_n"].return_value = top_n
     mocks["write_recommendations_to_postgres"].return_value = 2
-    mocks["write_recommendations_to_redis"].return_value = 2
 
     svd_training.run()
 
@@ -114,5 +110,3 @@ def test_run_full_happy_path_wires_tuned_params_and_persists_everywhere(monkeypa
     assert pg_args[0] == top_n
     assert pg_args[1] == svd_training.MODEL_VERSION
     assert isinstance(pg_args[2], datetime)
-
-    mocks["write_recommendations_to_redis"].assert_called_once_with(top_n)

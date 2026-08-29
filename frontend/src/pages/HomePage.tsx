@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Hero from '../components/Hero';
 import MovieRow from '../components/MovieRow';
-import { fetchMovies, fetchTrending } from '../api/movies';
+import { fetchMovies, fetchRecommendations, fetchTrending } from '../api/movies';
 import { useAuth } from '../hooks/useAuth';
 import type { Movie } from '../types/movie';
 
@@ -32,12 +32,12 @@ export default function HomePage() {
         // Fetch rows concurrently rather than sequentially to minimize load time. The
         // "recommended" row is only meaningful (and only fetched) for a logged-in user.
         const [recommendedRes, trendingRes, newReleasesRes] = await Promise.all([
-          user ? fetchMovies({ size: ROW_SIZE, sort: 'id,asc' }) : Promise.resolve(null),
+          user ? fetchRecommendations(ROW_SIZE) : Promise.resolve(null),
           fetchTrending(ROW_SIZE),
           fetchMovies({ size: ROW_SIZE, sort: 'releaseDate,desc' }),
         ]);
         if (cancelled) return;
-        setRecommended(recommendedRes?.items ?? []);
+        setRecommended(recommendedRes ?? []);
         setTrending(trendingRes.map((entry) => entry.movie));
         setNewReleases(newReleasesRes.items);
       } catch {

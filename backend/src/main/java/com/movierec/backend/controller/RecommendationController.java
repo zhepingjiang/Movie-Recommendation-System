@@ -1,7 +1,9 @@
 package com.movierec.backend.controller;
 
 import com.movierec.backend.dto.MovieRecommendationDto;
+import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.security.AuthenticatedUser;
+import com.movierec.backend.service.PersonalizedRecommendationService;
 import com.movierec.backend.service.RecommendationService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -14,14 +16,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Cold-start recommendations, proxied to the Python recommendation service.
+ * Recommendations for the current user: personalized recommendations read directly from
+ * Postgres (see {@link PersonalizedRecommendationService}), and cold-start recommendations
+ * proxied to the Python recommendation service for users with little or no history yet.
  *
- * <p><b>Security-sensitive.</b> FIX: the recommendation service's own endpoint takes a bare
- * {@code user_id} path parameter with no auth of its own — calling it directly from the browser
- * would let any signed-in user request any other user's personalized recommendations (IDOR). This
- * endpoint is the only sanctioned entry point: the user id always comes from the authenticated
- * JWT principal, never from client input, and the recommendation service is only ever called
- * server-to-server from here.
+ * <p><b>Security-sensitive.</b> FIX: the recommendation service's own cold-start endpoint takes a
+ * bare {@code user_id} path parameter with no auth of its own — calling it directly from the
+ * browser would let any signed-in user request any other user's personalized recommendations
+ * (IDOR). This controller is the only sanctioned entry point: the user id always comes from the
+ * authenticated JWT principal, never from client input, and the recommendation service is only
+ * ever called server-to-server from here.
  */
 @RestController
 @RequestMapping("/api/recommendations")
@@ -29,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class RecommendationController {
 
     private final RecommendationService recommendationService;
+    private final PersonalizedRecommendationService personalizedRecommendationService;
 
     // FIX: deliberately no @Validated on the class. Spring MVC validates @Min/@Max on
     // @RequestParam natively since Spring 6.1 and throws HandlerMethodValidationException, which
@@ -41,5 +46,12 @@ public class RecommendationController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
         return recommendationService.getColdStartRecommendations(principal.getId(), limit);
+    }
+
+    @GetMapping
+    public List<MovieSummaryDto> getRecommendations(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+        return personalizedRecommendationService.getRecommendations(principal.getId(), limit);
     }
 }

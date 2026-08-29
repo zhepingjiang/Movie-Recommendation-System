@@ -50,6 +50,13 @@ export function fetchTrending(limit: number): Promise<TrendingEntry[]> {
   return getJson<TrendingEntry[]>('/api/trending', { limit });
 }
 
+// Personalized recommendations for the current (authenticated) user, backfilled with trending
+// movies server-side when there aren't enough. Field names already match Movie's camelCase shape
+// (the backend returns MovieSummaryDto directly), unlike the cold-start endpoint below.
+export function fetchRecommendations(limit: number): Promise<Movie[]> {
+  return getJson<Movie[]>('/api/recommendations', { limit });
+}
+
 // Raw shape of a single entry from GET /api/recommendations/cold-start. Field names are
 // snake_case because the backend DTO reuses its gRPC-facing @JsonProperty annotations for the
 // HTTP response too (see MovieRecommendationDto on the backend).
