@@ -95,6 +95,13 @@ services:
       context: ./frontend
     ports:
       - "5173:5173"
+    volumes:
+      # Bind-mounts the real source tree so Vite's dev server hot-reloads on save instead of
+      # running against the snapshot COPY'd in at image-build time. The anonymous volume on
+      # node_modules keeps the container's own Linux-native install rather than letting the
+      # bind mount shadow it with (or expose an absent) Windows-side node_modules.
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
       - recommendation
 
