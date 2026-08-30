@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchMovieById, fetchMovies } from '../api/movies';
 import type { Movie } from '../types/movie';
 import { formatRuntime, releaseYear } from '../utils/format';
 import MovieRow from '../components/MovieRow';
+import RatingModal from '../components/RatingModal';
+import { useAuth } from '../hooks/useAuth';
 
 const PLACEHOLDER_POSTER =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="430"%3E%3Crect width="300" height="430" fill="%231c1c22"/%3E%3C/svg%3E';
@@ -14,9 +16,16 @@ const PLACEHOLDER_POSTER =
  */
 export default function MovieDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   // `undefined` = loading, `null` = fetched but not found, otherwise the loaded movie.
   const [movie, setMovie] = useState<Movie | null | undefined>(undefined);
   const [similarMovies, setSimilarMovies] = useState<Movie[]>([]);
+  const [ratingModalOpen, setRatingModalOpen] = useState(false);
+  // Only reflects a rating submitted this session -- there's no endpoint yet to fetch a user's
+  // existing rating, so a returning visitor sees "Rate this movie" even if they already rated it.
+  const [myRating, setMyRating] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +34,7 @@ export default function MovieDetailPage() {
     async function load() {
       setMovie(undefined);
       setSimilarMovies([]);
+      setMyRating(null);
       const found = await fetchMovieById(movieId);
       if (cancelled) return;
       setMovie(found);
@@ -61,6 +71,14 @@ export default function MovieDetailPage() {
 
   const runtime = formatRuntime(movie.durationMin);
 
+  function handleRateClick() {
+    if (!user) {
+      navigate('/login', { state: { from: location } });
+      return;
+    }
+    setRatingModalOpen(true);
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-[60px] py-10 pb-[60px]">
       <div className="flex flex-col gap-10 md:flex-row">
@@ -91,8 +109,55 @@ export default function MovieDetailPage() {
           <div className="mb-6 max-w-[720px] text-sm leading-[1.7] text-[#cfcfcf]">
             {movie.description ?? 'No synopsis available.'}
           </div>
+          <div className="flex flex-wrap gap-3">
+            <button className="inline-flex cursor-pointer items-center gap-2 rounded-md border-none bg-[#e50914] px-[26px] py-[11px] text-sm font-semibold text-white">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 flex-none">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Play now
+            </button>
+            <button className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4 flex-none"
+              >
+                <path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1a2 2 0 0 0 0 4v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1a2 2 0 0 0 0-4z" />
+                <path d="M13 5v2" />
+                <path d="M13 17v2" />
+                <path d="M13 11v2" />
+              </svg>
+              Get tickets
+            </button>
+            <button className="cursor-pointer rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white">
+              + Add to watchlist
+            </button>
+            <button
+              type="button"
+              onClick={handleRateClick}
+              className="cursor-pointer rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white"
+            >
+              {myRating !== null ? `★ Rated ${myRating}/5` : '☆ Rate this movie'}
+            </button>
+          </div>
         </div>
       </div>
+
+      {ratingModalOpen && (
+        <RatingModal
+          movieId={movie.id}
+          movieTitle={movie.title}
+          onClose={() => setRatingModalOpen(false)}
+          onRated={(score) => {
+            setMyRating(score);
+            setRatingModalOpen(false);
+          }}
+        />
+      )}
 
       {similarMovies.length > 0 && (
         <div className="mt-16">

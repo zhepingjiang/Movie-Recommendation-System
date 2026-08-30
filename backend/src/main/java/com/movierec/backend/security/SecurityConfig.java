@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -40,6 +41,14 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.disable())
+                // FIX: without this, Spring Security never adds its CorsFilter to the chain, so a
+                // preflight OPTIONS request to any authenticated endpoint (anything outside
+                // /api/auth/** or a permitAll GET) falls straight into anyRequest().authenticated()
+                // and gets a 401 with no CORS headers -- the browser then blocks the real
+                // PUT/POST/DELETE as a CORS failure before it's ever sent. Reuses WebConfig's
+                // existing addCorsMappings policy (auto-detected via HandlerMappingIntrospector);
+                // no separate CorsConfigurationSource bean needed.
+                .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(
                         ex ->

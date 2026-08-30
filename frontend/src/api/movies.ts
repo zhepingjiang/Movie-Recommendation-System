@@ -82,3 +82,26 @@ export async function fetchColdStartRecommendations(limit: number): Promise<Movi
     genres: rec.genres,
   }));
 }
+
+// Response of PUT /api/movies/{id}/rating. Field names already match the backend DTO
+// (MovieSummaryDto-style camelCase, not the cold-start endpoint's snake_case).
+export interface Rating {
+  movieId: number;
+  score: number;
+  updatedAt: string;
+}
+
+// Submits (or updates, since a user can rate a movie at most once) the current user's 1-5
+// rating for a movie. Requires auth -- 401s if the caller isn't logged in.
+export async function rateMovie(movieId: number, score: number): Promise<Rating> {
+  const res = await fetch(`${API_BASE_URL}/api/movies/${movieId}/rating`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ score }),
+  });
+  if (!res.ok) {
+    throw new Error(`Request to rate movie ${movieId} failed with status ${res.status}`);
+  }
+  return res.json();
+}
