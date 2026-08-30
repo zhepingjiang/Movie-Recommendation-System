@@ -1,9 +1,16 @@
+# FIX: build context must be the repo root (docker build -f backend/Dockerfile -t <tag> .), not
+# backend/ -- build.gradle's sourceSets.main.proto.srcDir '../proto' expects a proto/ directory
+# as a sibling of this module's root (same shared-contract setup as recommendation/Dockerfile),
+# which only exists if the build can see the repo root. This Dockerfile was never actually
+# build-tested before the k8s migration: docker-compose.yml runs the backend on the host, not in
+# a container, so nothing exercised this path until now.
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
-COPY gradlew .
-COPY gradle gradle
-COPY build.gradle settings.gradle ./
-COPY src src
+COPY backend/gradlew .
+COPY backend/gradle gradle
+COPY backend/build.gradle backend/settings.gradle ./
+COPY backend/src src
+COPY proto ../proto
 RUN ./gradlew bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre

@@ -1,0 +1,89 @@
+# SPRING_DATASOURCE_* are Spring Boot's standard relaxed-binding env vars -- they override
+# spring.datasource.* from application.yml (which hardcodes localhost with no ${VAR} placeholder,
+# unlike jwt/minio/redis/kafka which are already externalized) without needing any code change.
+#
+# MINIO_PUBLIC_URL deliberately stays http://localhost:9000 (not the in-cluster minio: DNS name):
+# it's used server-side to build avatar URLs that are then handed to the *browser*, and the
+# browser reaches MinIO the same way it reaches this backend -- via `kubectl port-forward` to the
+# same host port docker-compose already used. MINIO_ENDPOINT (server-to-server, this pod calling
+# MinIO's API directly) is the one that needs the in-cluster name.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: movie-rec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # FIX: Kubernetes auto-injects Docker-links-style env vars for every Service in the
+      # namespace (e.g. REDIS_PORT=tcp://10.x.x.x:6379), which collided with and overrode the
+      # plain-integer REDIS_PORT this app's application.yml expects, crashing the app on boot.
+      # We already do proper DNS-based service discovery (redis/postgres/kafka/minio/
+      # recommendation hostnames below), so this legacy injection is disabled everywhere.
+      enableServiceLinks: false
+      containers:
+        - name: backend
+          image: movie-rec-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/movierec
+            - name: SPRING_DATASOURCE_USERNAME
+              value: movierec
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SPRING_DATASOURCE_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: JWT_SECRET
+            - name: RECOMMENDATION_SERVICE_HOST
+              value: recommendation
+            - name: REDIS_HOST
+              value: redis
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka.movie-rec.svc.cluster.local:9092
+            - name: MINIO_ENDPOINT
+              value: http://minio:9000
+            - name: MINIO_PUBLIC_URL
+              value: http://localhost:9000
+            - name: COOKIE_SECURE
+              value: "false"
+          # No /actuator/health probe -- that endpoint is behind auth (see the future-improvements
+          # note in the migration summary), so a plain TCP check is the honest option without
+          # changing SecurityConfig as a side effect of this migration.
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: movie-rec
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080
