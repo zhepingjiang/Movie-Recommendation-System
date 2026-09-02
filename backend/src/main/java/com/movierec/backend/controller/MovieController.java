@@ -2,9 +2,14 @@ package com.movierec.backend.controller;
 
 import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.dto.PagedResponse;
+import com.movierec.backend.dto.SimilarMovieDto;
 import com.movierec.backend.security.AuthenticatedUser;
+import com.movierec.backend.service.ContentBasedRecommendationService;
 import com.movierec.backend.service.MovieService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MovieController {
 
     private final MovieService movieService;
+    private final ContentBasedRecommendationService contentBasedRecommendationService;
 
     /**
      * Lists movies with optional filtering and pagination.
@@ -63,5 +69,20 @@ public class MovieController {
                 .getMovieById(id, userId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Content-based "more like this" for a single movie, computed offline from movie
+     * metadata (description/genres) -- see {@link ContentBasedRecommendationService}.
+     *
+     * @param id the movie id
+     * @param limit how many similar movies to return
+     * @return the movie's cached similar-movies list, highest similarity first (may be shorter
+     *     than {@code limit}, or empty, if the movie has no cached neighbors yet)
+     */
+    @GetMapping("/{id}/similar")
+    public List<SimilarMovieDto> getSimilarMovies(
+            @PathVariable Long id, @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+        return contentBasedRecommendationService.getSimilarMovies(id, limit);
     }
 }

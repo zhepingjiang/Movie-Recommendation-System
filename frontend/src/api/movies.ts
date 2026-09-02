@@ -46,6 +46,20 @@ export function fetchGenres(): Promise<string[]> {
   return getJson<string[]>('/api/genres');
 }
 
+// Raw shape of a single entry from GET /api/movies/{id}/similar. Field names already match
+// Movie's camelCase shape (the backend returns MovieSummaryDto directly), same as recommendations.
+interface SimilarMovieEntry {
+  movie: Movie;
+  score: number;
+}
+
+// Content-based "more like this" for a single movie (see ContentBasedRecommendationService on the
+// backend) -- independent of any user, sourced purely from the movie's own description/genres.
+export async function fetchSimilarMovies(movieId: number, limit: number): Promise<Movie[]> {
+  const entries = await getJson<SimilarMovieEntry[]>(`/api/movies/${movieId}/similar`, { limit });
+  return entries.map((entry) => entry.movie);
+}
+
 export function fetchTrending(limit: number): Promise<TrendingEntry[]> {
   return getJson<TrendingEntry[]>('/api/trending', { limit });
 }
