@@ -59,6 +59,8 @@ public class SecurityConfig {
                         auth ->
                                 auth.requestMatchers("/error")
                                         .permitAll()
+                                        .requestMatchers("/actuator/prometheus")
+                                        .permitAll()
                                         .requestMatchers("/api/auth/**")
                                         .permitAll()
                                         .requestMatchers(
