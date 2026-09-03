@@ -221,17 +221,32 @@ def load_ratings() -> list[tuple[int, int, int]]:
     return [(r["user_id"], r["movie_id"], int(r["score"])) for r in rows]
 
 
+def score_candidates(
+    liked_movies: set[int], rated_movies: set[int], top_k_by_movie: dict[int, list[tuple[int, float]]]
+) -> dict[int, float]:
+    """Scores every movie similar to something in `liked_movies` by the mean cosine similarity
+    across all of that user's liked movies it neighbors -- bounded to [0, 1], the same scale as
+    the item-item scores it's built from. Movies in `rated_movies` are excluded. A movie with no
+    similarity relationship to anything liked is simply absent from the result, not scored 0 --
+    callers that need a fixed candidate set (e.g. the eval harness, ranking a shared catalog
+    against both models) are responsible for filling in that 0 themselves.
+    """
+    candidate_sims = defaultdict(list)
+    for movie_id in liked_movies:
+        for neighbor_id, sim in top_k_by_movie.get(movie_id, []):
+            if neighbor_id not in rated_movies:
+                candidate_sims[neighbor_id].append(sim)
+    return {mid: sum(sims) / len(sims) for mid, sims in candidate_sims.items()}
+
+
 def aggregate_user_scores(
     ratings: list[tuple[int, int, int]],
     top_k_by_movie: dict[int, list[tuple[int, float]]],
     n: int = USER_PERSIST_N,
 ) -> dict[int, list[tuple[int, float]]]:
-    """For each user, scores every movie similar to something they rated >= LIKED_RATING_THRESHOLD
-    by the mean cosine similarity across all of that user's liked movies it neighbors -- bounded to
-    [0, 1], the same scale as the item-item scores it's built from. Movies the user already rated
-    are excluded from their own candidate list. Users with no liked movies (no ratings, or every
-    rating below the threshold) are simply absent from the result -- there's nothing to aggregate
-    from, not a zero score.
+    """For each user, ranks score_candidates' output for everything they rated >= LIKED_RATING_THRESHOLD,
+    keeping the top n. Users with no liked movies (no ratings, or every rating below the threshold)
+    are simply absent from the result -- there's nothing to aggregate from, not a zero score.
     """
     rated_by_user = defaultdict(set)
     liked_by_user = defaultdict(set)
@@ -242,14 +257,11 @@ def aggregate_user_scores(
 
     results = {}
     for user_id, liked_movies in liked_by_user.items():
-        candidate_sims = defaultdict(list)
-        for movie_id in liked_movies:
-            for neighbor_id, sim in top_k_by_movie.get(movie_id, []):
-                if neighbor_id not in rated_by_user[user_id]:
-                    candidate_sims[neighbor_id].append(sim)
-
-        scored = [(mid, sum(sims) / len(sims)) for mid, sims in candidate_sims.items()]
-        scored.sort(key=lambda p: p[1], reverse=True)
+        scored = sorted(
+            score_candidates(liked_movies, rated_by_user[user_id], top_k_by_movie).items(),
+            key=lambda p: p[1],
+            reverse=True,
+        )
         if scored:
             results[user_id] = scored[:n]
     return results

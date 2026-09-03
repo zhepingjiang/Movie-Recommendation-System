@@ -18,6 +18,7 @@ from models.content_based_training import (
     load_movie_genres,
     load_movies,
     load_ratings,
+    score_candidates,
 )
 
 
@@ -117,6 +118,28 @@ class TestAggregateUserScores:
         result = aggregate_user_scores(ratings, top_k_by_movie, n=2)
 
         assert result == {1: [(20, 0.9), (21, 0.8)]}
+
+
+class TestScoreCandidates:
+    def test_returns_mean_similarity_per_candidate(self):
+        result = score_candidates({10}, set(), {10: [(20, 0.9), (21, 0.5)]})
+
+        assert result == {20: 0.9, 21: 0.5}
+
+    def test_averages_across_multiple_liked_movies(self):
+        result = score_candidates({10, 11}, set(), {10: [(20, 1.0)], 11: [(20, 0.6)]})
+
+        assert result == {20: 0.8}
+
+    def test_excludes_rated_movies(self):
+        result = score_candidates({10}, {20}, {10: [(20, 0.9), (21, 0.5)]})
+
+        assert result == {21: 0.5}
+
+    def test_movie_with_no_relationship_is_absent_not_zero(self):
+        result = score_candidates({10}, set(), {10: [(20, 0.9)]})
+
+        assert 99 not in result
 
 
 class TestComputeTopKNeighbors:
