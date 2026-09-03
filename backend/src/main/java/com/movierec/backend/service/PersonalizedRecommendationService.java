@@ -28,9 +28,9 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class PersonalizedRecommendationService {
 
-    // Must match models/svd_training.py's MODEL_VERSION -- there's no shared source of truth
-    // across the two services for this value, so keep them in sync by hand.
-    private static final String MODEL_VERSION = "svd_v1";
+    // Must match models/recommendation_blending.py's MODEL_VERSION -- there's no shared source of
+    // truth across the two services for this value, so keep them in sync by hand.
+    private static final String MODEL_VERSION = "blended_v1";
 
     private final RecommendationCacheRepository recommendationCacheRepository;
     private final MovieService movieService;

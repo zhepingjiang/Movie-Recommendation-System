@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import evaluation.evaluate_models as evaluate_models
-from evaluation.evaluate_models import evaluate, rank_content, rank_svd
+from evaluation.evaluate_models import evaluate, evaluate_blend_grid, rank_content, rank_svd, top_n_scores
 
 
 class FakeAlgo:
@@ -36,6 +36,40 @@ class TestRankContent:
         result = rank_content(liked_movies={100}, rated_movies=set(), top_k_by_movie=top_k_by_movie, candidates=[10, 11])
 
         assert result == [10, 11]  # 10 scored 0.9, 11 filled with 0.0
+
+
+class TestTopNScores:
+    def test_keeps_only_the_highest_n(self):
+        assert top_n_scores({1: 0.5, 2: 0.9, 3: 0.1}, n=2) == {2: 0.9, 1: 0.5}
+
+
+class TestEvaluateBlendGrid:
+    def test_selects_ndcg_per_grid_point_using_training_set_counts_only(self, monkeypatch):
+        # A single grid point, small enough to hand-verify: user has 1 training rating (movie 10,
+        # liked), so user_alpha = 1/N0; movie 20 (the held-out item) has 1 training-set rating
+        # (from a second user), so item_confidence = 1/M0. With N0=M0=1, effective_alpha=1.0 ->
+        # pure SVD, and the fake algo ranks the held-out movie 20 first.
+        monkeypatch.setattr(evaluate_models, "N0_GRID", [1])
+        monkeypatch.setattr(evaluate_models, "M0_GRID", [1])
+        algo = FakeAlgo({("pg:1", 20): 5.0, ("pg:1", 21): 1.0})
+        top_k_by_movie = {}
+        all_movie_ids = [20, 21]
+        training_ratings = [(1, 10, 5), (2, 20, 5)]  # user 1 liked movie 10; user 2 rated movie 20
+        holdout_by_user = {1: (20, 5)}  # relevant (>= 4.0)
+        rated_movies_by_user = {1: {10}}
+
+        result = evaluate_blend_grid(
+            algo, top_k_by_movie, all_movie_ids, training_ratings, holdout_by_user, rated_movies_by_user
+        )
+
+        assert result == {(1, 1): 1.0}
+
+    def test_none_when_no_grid_point_has_evaluable_users(self):
+        holdout_by_user = {1: (20, 2)}  # rating 2 -- below RELEVANT_RATING_THRESHOLD (4.0)
+
+        result = evaluate_blend_grid(FakeAlgo({}), {}, [20, 21], [], holdout_by_user, {1: set()})
+
+        assert all(value is None for value in result.values())
 
 
 class TestEvaluate:
@@ -74,6 +108,8 @@ def _patch_run_dependencies(monkeypatch, *, holdout_by_user):
         "train_leakage_free_svd": MagicMock(return_value=MagicMock(name="algo")),
         "evaluate": MagicMock(return_value={"svd": {}, "content": {}}),
         "print_results": MagicMock(return_value=None),
+        "evaluate_blend_grid": MagicMock(return_value={}),
+        "print_blend_grid_results": MagicMock(return_value=None),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(evaluate_models, name, mock)
@@ -103,6 +139,8 @@ def test_run_returns_early_when_no_eligible_users(monkeypatch, capsys):
     cbt_mocks["load_movies"].assert_not_called()
     mocks["evaluate"].assert_not_called()
     mocks["print_results"].assert_not_called()
+    mocks["evaluate_blend_grid"].assert_not_called()
+    mocks["print_blend_grid_results"].assert_not_called()
     assert "nothing to evaluate" in capsys.readouterr().out
 
 
@@ -126,5 +164,10 @@ def test_run_full_happy_path_wires_everything(monkeypatch):
     assert eval_args[3] == training_ratings
     assert eval_args[4] == holdout_by_user
     assert eval_args[5] == rated_movies_by_user
-
     mocks["print_results"].assert_called_once_with(fake_results, 1)
+
+    grid_args = mocks["evaluate_blend_grid"].call_args.args
+    assert grid_args[3] == training_ratings
+    assert grid_args[4] == holdout_by_user
+    assert grid_args[5] == rated_movies_by_user
+    mocks["print_blend_grid_results"].assert_called_once_with(mocks["evaluate_blend_grid"].return_value)

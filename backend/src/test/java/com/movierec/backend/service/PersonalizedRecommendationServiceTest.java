@@ -23,7 +23,7 @@ import org.springframework.data.domain.PageRequest;
 @ExtendWith(MockitoExtension.class)
 class PersonalizedRecommendationServiceTest {
 
-    private static final String MODEL_VERSION = "svd_v1";
+    private static final String MODEL_VERSION = "blended_v1";
     private static final Long USER_ID = 1L;
 
     @Mock private RecommendationCacheRepository recommendationCacheRepository;
