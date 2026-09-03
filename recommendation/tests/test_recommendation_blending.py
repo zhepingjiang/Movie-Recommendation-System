@@ -115,6 +115,22 @@ class TestBlendAllUsers:
 
         assert [movie_id for movie_id, _ in result[1]] == [10, 11]
 
+    def test_logs_the_weight_assigned_to_each_model_per_user(self, caplog):
+        with caplog.at_level("INFO", logger="models.recommendation_blending"):
+            blend_all_users(
+                svd_scores_by_user={1: {10: 1.0}},
+                content_scores_by_user={1: {10: 0.0}},
+                user_rating_counts={1: 10},  # user_alpha = 10/10 = 1.0
+                movie_rating_counts={10: 20},  # item_confidence = 20/20 = 1.0
+                n0=10,
+                m0=20,
+            )
+
+        [record] = caplog.records
+        message = record.getMessage()
+        assert "user 1" in message
+        assert "svd_weight=1.00" in message
+
     def test_includes_users_present_in_only_one_model(self):
         result = blend_all_users(
             svd_scores_by_user={1: {10: 1.0}},

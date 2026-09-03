@@ -21,14 +21,22 @@ search periodically as more real rating data accumulates; the defaults below ref
 against today's (still very small) real dataset, and are noisy for exactly that reason.
 
 Not part of the request path -- triggered manually via recommendation/scripts/blend_recommendations.py.
+
+blend_all_users logs each user's user_alpha (before item_confidence) and mean effective_alpha
+(after) at INFO -- this is the one place in the whole pipeline where the resulting weight split
+between SVD and content-based is otherwise invisible, so it's worth surfacing in job logs even
+though nothing else in this codebase uses `logging` (everywhere else just prints).
 """
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
 from psycopg2.extras import execute_values
 
 from db import get_cursor
+
+logger = logging.getLogger(__name__)
 
 MODEL_VERSION = "blended_v1"
 SVD_MODEL_VERSION = "svd_v1"
@@ -138,14 +146,29 @@ def blend_all_users(
     whichever model actually has something for them."""
     results = {}
     for user_id in set(svd_scores_by_user) | set(content_scores_by_user):
-        blended = blend_scores(
-            svd_scores_by_user.get(user_id, {}),
-            content_scores_by_user.get(user_id, {}),
-            user_rating_counts.get(user_id, 0),
-            movie_rating_counts,
-            n0,
-            m0,
+        rating_count = user_rating_counts.get(user_id, 0)
+        svd_scores = svd_scores_by_user.get(user_id, {})
+        content_scores = content_scores_by_user.get(user_id, {})
+
+        alpha_from_user_history = user_alpha(rating_count, n0)
+        candidates = set(svd_scores) | set(content_scores)
+        mean_effective_alpha = (
+            sum(effective_alpha(rating_count, movie_rating_counts.get(m, 0), n0, m0) for m in candidates)
+            / len(candidates)
+            if candidates
+            else alpha_from_user_history
         )
+        logger.info(
+            "user %s: rating_count=%d -> svd_weight=%.2f before item_confidence, "
+            "%.2f mean after (content_weight=%.2f)",
+            user_id,
+            rating_count,
+            alpha_from_user_history,
+            mean_effective_alpha,
+            1 - mean_effective_alpha,
+        )
+
+        blended = blend_scores(svd_scores, content_scores, rating_count, movie_rating_counts, n0, m0)
         if blended:
             results[user_id] = sorted(blended.items(), key=lambda p: p[1], reverse=True)
     return results
@@ -170,6 +193,11 @@ def write_blended_scores_to_postgres(
 
 
 def run() -> None:
+    # No logging is configured elsewhere in this codebase (every other job just prints) --
+    # basicConfig is a no-op if something else already configured the root logger, so this is
+    # safe to call here regardless of whether run() is invoked directly or via offline_pipeline.py.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     print("Loading cached SVD and content-based recommendations...")
     svd_scores_by_user = load_cached_scores(SVD_MODEL_VERSION)
     content_scores_by_user = load_cached_scores(CONTENT_MODEL_VERSION)
