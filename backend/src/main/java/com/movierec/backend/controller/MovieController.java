@@ -1,5 +1,6 @@
 package com.movierec.backend.controller;
 
+import com.movierec.backend.dto.MovieCreditsDto;
 import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.dto.PagedResponse;
 import com.movierec.backend.dto.SimilarMovieDto;
@@ -84,5 +85,20 @@ public class MovieController {
     public List<SimilarMovieDto> getSimilarMovies(
             @PathVariable Long id, @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
         return contentBasedRecommendationService.getSimilarMovies(id, limit);
+    }
+
+    /**
+     * Director + top-billed cast for a single movie, sourced from the TMDb credits API
+     * (see backend/scripts/backfill_movie_credits.py).
+     *
+     * @param id the movie id
+     * @return 200 with the movie's credits if found, otherwise 404
+     */
+    @GetMapping("/{id}/credits")
+    public ResponseEntity<MovieCreditsDto> getMovieCredits(@PathVariable Long id) {
+        return movieService
+                .getMovieCredits(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

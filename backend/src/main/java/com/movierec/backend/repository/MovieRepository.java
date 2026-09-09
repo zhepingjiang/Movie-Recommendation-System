@@ -25,4 +25,17 @@ public interface MovieRepository extends JpaRepository<Movie, Long>, JpaSpecific
     /** Loads a single movie with its {@code genres} collection eagerly fetched. */
     @Query("SELECT DISTINCT m FROM Movie m LEFT JOIN FETCH m.genres WHERE m.id = :id")
     Optional<Movie> findByIdWithGenres(@Param("id") Long id);
+
+    /**
+     * Loads a single movie with its {@code director} and {@code cast} (each cast member's
+     * {@code person} included) eagerly fetched, cast ordered by billing order.
+     */
+    @Query(
+            "SELECT DISTINCT m FROM Movie m "
+                    + "LEFT JOIN FETCH m.director "
+                    + "LEFT JOIN FETCH m.cast mc "
+                    + "LEFT JOIN FETCH mc.person "
+                    + "WHERE m.id = :id "
+                    + "ORDER BY mc.castOrder")
+    Optional<Movie> findByIdWithCredits(@Param("id") Long id);
 }

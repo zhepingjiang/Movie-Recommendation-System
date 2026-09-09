@@ -1,4 +1,4 @@
-import type { Movie, PagedResponse, TrendingEntry } from '../types/movie';
+import type { Movie, MovieCredits, PagedResponse, TrendingEntry } from '../types/movie';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -58,6 +58,19 @@ interface SimilarMovieEntry {
 export async function fetchSimilarMovies(movieId: number, limit: number): Promise<Movie[]> {
   const entries = await getJson<SimilarMovieEntry[]>(`/api/movies/${movieId}/similar`, { limit });
   return entries.map((entry) => entry.movie);
+}
+
+// Director + top-billed cast for a single movie (see MovieController#getMovieCredits on the
+// backend). Field names already match MovieCredits's camelCase shape.
+export async function fetchMovieCredits(movieId: number): Promise<MovieCredits | null> {
+  const res = await fetch(`${API_BASE_URL}/api/movies/${movieId}/credits`, { credentials: 'include' });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`Request for movie ${movieId} credits failed with status ${res.status}`);
+  }
+  return res.json();
 }
 
 export function fetchTrending(limit: number): Promise<TrendingEntry[]> {

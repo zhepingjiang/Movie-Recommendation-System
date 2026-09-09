@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { fetchMovieById, fetchSimilarMovies } from "../api/movies";
-import type { Movie } from "../types/movie";
+import { fetchMovieById, fetchMovieCredits, fetchSimilarMovies } from "../api/movies";
+import type { Movie, MovieCredits } from "../types/movie";
 import { formatRuntime, releaseYear } from "../utils/format";
 import MovieRow from "../components/MovieRow";
 import RatingModal from "../components/RatingModal";
@@ -22,6 +22,7 @@ export default function MovieDetailPage() {
   const location = useLocation();
   // `undefined` = loading, `null` = fetched but not found, otherwise the loaded movie.
   const [movie, setMovie] = useState<Movie | null | undefined>(undefined);
+  const [credits, setCredits] = useState<MovieCredits | null>(null);
   const [similarMovies, setSimilarMovies] = useState<Movie[]>([]);
   const [ratingModalOpen, setRatingModalOpen] = useState(false);
   // Only reflects a rating submitted this session -- there's no endpoint yet to fetch a user's
@@ -34,17 +35,22 @@ export default function MovieDetailPage() {
 
     async function load() {
       setMovie(undefined);
+      setCredits(null);
       setSimilarMovies([]);
       setMyRating(null);
       const found = await fetchMovieById(movieId);
       if (cancelled) return;
       setMovie(found);
 
-      // Only fetch similar movies once the primary movie resolves. The backend already excludes
-      // the movie itself and returns highest-similarity first.
+      // Only fetch credits/similar movies once the primary movie resolves. The backend already
+      // excludes the movie itself from "similar" and returns highest-similarity first.
       if (found) {
-        const similar = await fetchSimilarMovies(found.id, 8);
+        const [movieCredits, similar] = await Promise.all([
+          fetchMovieCredits(found.id),
+          fetchSimilarMovies(found.id, 8),
+        ]);
         if (cancelled) return;
+        setCredits(movieCredits);
         setSimilarMovies(similar);
       }
     }
@@ -111,6 +117,22 @@ export default function MovieDetailPage() {
               </span>
             ))}
           </div>
+          {(credits?.director || (credits?.cast.length ?? 0) > 0) && (
+            <div className="mb-6 max-w-[720px] text-sm leading-[1.7] text-[#999]">
+              {credits?.director && (
+                <div>
+                  <span className="font-semibold text-[#666]">Director: </span>
+                  {credits.director}
+                </div>
+              )}
+              {credits && credits.cast.length > 0 && (
+                <div>
+                  <span className="font-semibold text-[#666]">Starring: </span>
+                  {credits.cast.join(", ")}
+                </div>
+              )}
+            </div>
+          )}
           <div className="mb-6 max-w-[720px] text-sm leading-[1.7] text-[#cfcfcf]">
             {movie.description ?? "No synopsis available."}
           </div>

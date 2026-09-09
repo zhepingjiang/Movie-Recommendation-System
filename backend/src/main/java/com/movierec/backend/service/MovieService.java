@@ -1,8 +1,11 @@
 package com.movierec.backend.service;
 
+import com.movierec.backend.dto.MovieCreditsDto;
 import com.movierec.backend.dto.MovieSummaryDto;
 import com.movierec.backend.entity.Genre;
 import com.movierec.backend.entity.Movie;
+import com.movierec.backend.entity.MovieCast;
+import com.movierec.backend.entity.MoviePerson;
 import com.movierec.backend.event.MovieViewEventProducer;
 import com.movierec.backend.repository.MovieRepository;
 import com.movierec.backend.repository.MovieSpecifications;
@@ -103,6 +106,24 @@ public class MovieService {
         }
         return movieRepository.findAllByIdInWithGenres(ids).stream()
                 .collect(Collectors.toMap(Movie::getId, this::toSummaryDto));
+    }
+
+    /**
+     * Fetches a single movie's director + top-billed cast, flattened to plain names.
+     *
+     * @return empty if no movie has that id; a movie with no director on file yields a
+     *     {@link MovieCreditsDto} with a null {@code director} rather than a missing record
+     */
+    public Optional<MovieCreditsDto> getMovieCredits(Long id) {
+        return movieRepository.findByIdWithCredits(id).map(this::toCreditsDto);
+    }
+
+    /** Flattens a {@link Movie} entity's director + cast associations into a {@link MovieCreditsDto}. */
+    private MovieCreditsDto toCreditsDto(Movie movie) {
+        String directorName = movie.getDirector() == null ? null : movie.getDirector().getName();
+        List<String> castNames =
+                movie.getCast().stream().map(MovieCast::getPerson).map(MoviePerson::getName).toList();
+        return new MovieCreditsDto(directorName, castNames);
     }
 
     /** Flattens a {@link Movie} entity's genre associations into a {@link MovieSummaryDto}. */

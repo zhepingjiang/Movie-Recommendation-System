@@ -21,3 +21,8 @@ export interface TrendingEntry {
   movie: Movie;
   viewCount: number;
 }
+
+export interface MovieCredits {
+  director: string | null;
+  cast: string[];
+}
