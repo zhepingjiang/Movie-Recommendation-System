@@ -67,7 +67,8 @@ public class SecurityConfig {
                                                 HttpMethod.GET,
                                                 "/api/movies/**",
                                                 "/api/genres/**",
-                                                "/api/trending/**")
+                                                "/api/trending/**",
+                                                "/api/search/**")
                                         .permitAll()
                                         .requestMatchers("/api/admin/**")
                                         .hasRole("ADMIN")
