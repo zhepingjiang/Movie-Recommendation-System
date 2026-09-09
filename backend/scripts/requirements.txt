@@ -1,0 +1,4 @@
+# For index_movies_to_elasticsearch.py. Other scripts in this directory (backfill_movie_credits.py,
+# backfill_movielens_movies.py, generate_movie_seed.py) only need `requests`/stdlib, already
+# available ambiently -- this is the first one needing something extra.
+elasticsearch==9.5.0
