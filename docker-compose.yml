@@ -67,6 +67,26 @@ services:
       timeout: 5s
       retries: 10
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.2
+    environment:
+      discovery.type: single-node
+      # Dev-only: disables auth + TLS, which ES 8+/9+ otherwise turns on by default and which
+      # the backend's client isn't configured for. Matching the rest of this compose file
+      # (postgres, minio, grafana) in scoping "no auth" to local dev only.
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   recommendation:
     build:
       # Context is the repo root, not ./recommendation: the Dockerfile needs to reach the
@@ -139,5 +159,6 @@ volumes:
   postgres_data:
   minio_data:
   redis_data:
+  elasticsearch_data:
   prometheus_data:
   grafana_data:
