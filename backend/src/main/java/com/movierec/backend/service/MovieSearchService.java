@@ -1,6 +1,9 @@
 package com.movierec.backend.service;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.movierec.backend.dto.MovieSummaryDto;
@@ -9,10 +12,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * Full-text movie search backed by the Elasticsearch {@code movies} index (see
@@ -35,26 +40,26 @@ public class MovieSearchService {
 
     /**
      * @param query free-text search query
+     * @param genre optional exact genre name filter, applied alongside the text query (same role
+     *     as {@link com.movierec.backend.repository.MovieSpecifications#hasGenre} for the
+     *     postgres-backed browse endpoint)
+     * @param minRating optional inclusive lower bound on average rating
      * @param page zero-based page number
      * @param size page size
      * @return a page of matching movies; empty (not an error) if nothing matches
      */
-    public PagedResponse<MovieSummaryDto> search(String query, int page, int size) {
+    public PagedResponse<MovieSummaryDto> search(
+            String query, String genre, BigDecimal minRating, int page, int size) {
+        SearchRequest request =
+                SearchRequest.of(
+                        r ->
+                                r.index(MOVIES_INDEX)
+                                        .from(page * size)
+                                        .size(size)
+                                        .query(buildQuery(query, genre, minRating)));
+
         try {
-            SearchResponse<MovieDocument> response =
-                    elasticsearchClient.search(
-                            request ->
-                                    request.index(MOVIES_INDEX)
-                                            .from(page * size)
-                                            .size(size)
-                                            .query(
-                                                    q ->
-                                                            q.multiMatch(
-                                                                    m ->
-                                                                            m.query(query)
-                                                                                    .fields(BOOSTED_FIELDS)
-                                                                                    .fuzziness("AUTO"))),
-                            MovieDocument.class);
+            SearchResponse<MovieDocument> response = elasticsearchClient.search(request, MovieDocument.class);
 
             List<MovieSummaryDto> items =
                     response.hits().hits().stream()
@@ -71,6 +76,30 @@ public class MovieSearchService {
         } catch (IOException e) {
             throw new UncheckedIOException("Elasticsearch search failed for query: " + query, e);
         }
+    }
+
+    /**
+     * Builds the text-relevance query (must) plus any exact-match filters (genre, minimum
+     * rating), so the two behave like the postgres-backed browse endpoint's combinable filters
+     * ({@link com.movierec.backend.repository.MovieSpecifications}) rather than the ES text
+     * match silently ignoring them.
+     */
+    private Query buildQuery(String query, String genre, BigDecimal minRating) {
+        List<Query> filters = new ArrayList<>();
+        if (StringUtils.hasText(genre)) {
+            filters.add(Query.of(q -> q.term(t -> t.field("genres.keyword").value(genre))));
+        }
+        if (minRating != null) {
+            filters.add(
+                    Query.of(q -> q.range(r -> r.number(n -> n.field("averageRating").gte(minRating.doubleValue())))));
+        }
+
+        BoolQuery.Builder boolQuery =
+                new BoolQuery.Builder()
+                        .must(m -> m.multiMatch(mm -> mm.query(query).fields(BOOSTED_FIELDS).fuzziness("AUTO")))
+                        .filter(filters);
+
+        return Query.of(q -> q.bool(boolQuery.build()));
     }
 
     /**

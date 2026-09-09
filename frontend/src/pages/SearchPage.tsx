@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { fetchGenres, fetchMovies } from '../api/movies';
+import { fetchGenres, fetchMovies, searchMovies } from '../api/movies';
 import type { Movie } from '../types/movie';
 import MovieCard from '../components/MovieCard';
 
@@ -55,13 +55,22 @@ export default function SearchPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetchMovies({
-          page,
-          size: PAGE_SIZE,
-          query: debouncedQuery || undefined,
-          genre: genre === 'All' ? undefined : genre,
-          minRating: minRating || undefined,
-        });
+        // With free text, use Elasticsearch-backed relevance search (title/director/cast/genres/
+        // overview, fuzzy-matched); with no text, fall back to the plain browse/filter endpoint --
+        // relevance ranking doesn't mean anything without a query to rank against.
+        const res = debouncedQuery
+          ? await searchMovies(debouncedQuery, {
+              page,
+              size: PAGE_SIZE,
+              genre: genre === 'All' ? undefined : genre,
+              minRating: minRating || undefined,
+            })
+          : await fetchMovies({
+              page,
+              size: PAGE_SIZE,
+              genre: genre === 'All' ? undefined : genre,
+              minRating: minRating || undefined,
+            });
         if (cancelled) return;
         setResults(res.items);
         setTotalPages(res.totalPages);

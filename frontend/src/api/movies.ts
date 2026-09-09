@@ -42,6 +42,20 @@ export async function fetchMovieById(id: number): Promise<Movie | null> {
   return res.json();
 }
 
+export interface MovieSearchParams {
+  page?: number;
+  size?: number;
+  genre?: string;
+  minRating?: number;
+}
+
+// Full-text search (title/director/cast/genres/overview, fuzzy-matched, ranked by relevance --
+// see SearchController/MovieSearchService on the backend), as opposed to fetchMovies' plain
+// title substring filter. genre/minRating are applied as filters alongside the text query.
+export function searchMovies(query: string, params: MovieSearchParams = {}): Promise<PagedResponse<Movie>> {
+  return getJson<PagedResponse<Movie>>('/api/search', { q: query, ...params });
+}
+
 export function fetchGenres(): Promise<string[]> {
   return getJson<string[]>('/api/genres');
 }
