@@ -38,6 +38,21 @@ This is a monorepo with three services:
 - Recommendation: keep FastAPI routes thin; business logic goes in separate modules under `models/` or a `services/` folder.
 - Keep environment-specific config (DB passwords, API keys) out of code — use environment variables or `.env` (gitignored).
 
+### Variable & Parameter Naming
+
+- Prioritize readability and explicit naming over brevity when writing or modifying code.
+- For variable names, function parameters, and intermediate values, prefer descriptive names that clearly communicate meaning and type. Do NOT use overly abbreviated names such as `mid`, `sims`, `idx`, `res`, `data`, `obj`, `val`, `tmp`, etc. unless the meaning is completely obvious from the immediate context.
+- Examples:
+  - Prefer `movie_id` over `mid`
+  - Prefer `similarity_scores` over `sims`
+  - Prefer `candidate_movie_id` over `cid`
+  - Prefer `similarity_score` over `sim`
+  - Prefer `user_id` over `uid`
+  - Prefer `recommendations` over `recs`
+- When choosing between a shorter name and a more descriptive one, prefer the descriptive name even if it's longer.
+- This is especially important in Python, where type information is often less explicit than in Java.
+- A reader should be able to understand what a variable represents without inferring it from surrounding code.
+
 ## Communication
  
 - If a request is ambiguous, ask one clarifying question rather than guessing on something significant (e.g. database schema decisions, API contract between frontend and backend).

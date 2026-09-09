@@ -4,11 +4,16 @@ Each function takes one user's ranked candidate list (movie ids, highest score f
 of relevant movie ids for that user. This module stays agnostic to what "relevant" means -- see
 RELEVANT_RATING_THRESHOLD in evaluate_models.py -- it just consumes whatever set it's given, so it
 works unchanged if that definition (or the holdout size) ever changes.
+
+- Precision@K: How many of the recommended movies does the user actually like?
+- Recall@K: How many of the movies the user likes did we successfully recommend?
+- NDCG@K: How well are the movies the user likes ranked in the recommendation list?
+- Coverage@K: How much of the movie catalog is covered by the recommendations?
 """
 
 import math
 
-
+# Precision@K: How many of the recommended movies does the user actually like?
 def precision_at_k(ranked_movie_ids: list[int], relevant_movie_ids: set[int], k: int) -> float | None:
     """None (not 0) when the user has no relevant items -- there's nothing to be precise about,
     and averaging that in as a 0 would understate every model equally, hiding the real signal."""
@@ -17,7 +22,7 @@ def precision_at_k(ranked_movie_ids: list[int], relevant_movie_ids: set[int], k:
     hits = sum(1 for m in ranked_movie_ids[:k] if m in relevant_movie_ids)
     return hits / k
 
-
+# Recall@K: How many of the movies the user likes did we successfully recommend?
 def recall_at_k(ranked_movie_ids: list[int], relevant_movie_ids: set[int], k: int) -> float | None:
     """None (not 0) for the same reason as precision_at_k -- recall is undefined (0/0), not 0,
     when there's no relevant item to have found."""
@@ -26,7 +31,7 @@ def recall_at_k(ranked_movie_ids: list[int], relevant_movie_ids: set[int], k: in
     hits = sum(1 for m in ranked_movie_ids[:k] if m in relevant_movie_ids)
     return hits / len(relevant_movie_ids)
 
-
+# NDCG@K: How well are the movies the user likes ranked in the recommendation list?
 def ndcg_at_k(ranked_movie_ids: list[int], relevant_movie_ids: set[int], k: int) -> float | None:
     if not relevant_movie_ids:
         return None
@@ -43,7 +48,7 @@ def mean_metric(values: list[float | None]) -> float | None:
     present = [v for v in values if v is not None]
     return sum(present) / len(present) if present else None
 
-
+# Coverage@K: How much of the movie catalog is covered by the recommendations?
 def coverage(ranked_lists_by_user: dict[int, list[int]], catalog_size: int, k: int) -> float:
     """Fraction of the full candidate catalog that appears in *any* user's top-k across the whole
     evaluation run -- a model that always recommends the same popular handful scores low here even

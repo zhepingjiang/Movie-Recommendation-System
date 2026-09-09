@@ -41,6 +41,29 @@ def build_holdout_split(
       eligible user.
     - rated_movies_by_user: dict[user_id, set[movie_id]] -- an eligible user's *training* movie
       ids (excludes the held-out one), for building each user's candidate catalog.
+    Example:
+    Input:
+        User 1: A(5, Jan), B(4, Feb), C(5, Mar)
+        User 2: D(4, Jan), E(5, Feb)
+
+    Output:
+        training_ratings = [
+            (1, A, 5),
+            (1, B, 4),
+            (2, D, 4),
+            (2, E, 5),
+        ]
+
+        holdout_by_user = {
+            1: (C, 5),
+        }
+
+        rated_movies_by_user = {
+            1: {A, B},
+        }
+
+    User 1 has enough ratings, so the latest rating C is held out.
+    User 2 has too few ratings, so all ratings remain in training.
     """
     by_user = defaultdict(list)
     for user_id, movie_id, score, created_at in ratings_with_timestamps:
