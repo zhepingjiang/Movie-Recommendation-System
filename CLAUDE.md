@@ -24,6 +24,11 @@ This is a monorepo with three services:
 - Preserve existing naming conventions and folder structure — don't reorganize things unprompted.
 - When adding a new dependency (npm package, Maven dependency, pip package), tell me what it is and why before installing it.
 
+## Bug Fix Comments
+
+- Any time you make a change that fixes a bug — whether the user reported it or you found it yourself — add a `FIX:` comment, briefly noting what was wrong.
+- Place the comment immediately above the specific line(s) that fix the bug — not in a function-level docstring/Javadoc — unless the user explicitly asks for it at the function level.
+
 ## Testing & Verification
  
 - After scaffolding or modifying a service, always try to run/build it and confirm there are no errors before telling me it's done.

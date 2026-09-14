@@ -2,7 +2,9 @@ package com.movierec.backend.service;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -35,6 +37,13 @@ public class MovieSearchService {
     /** Must match the mapping's field names and the boosts agreed for this search feature. */
     private static final List<String> BOOSTED_FIELDS =
             List.of("title^10", "director^4", "cast^3", "genres^2", "overview^1");
+
+    /**
+     * Extra score multiplier for a literal phrase match (e.g. "black widow" appearing verbatim
+     * in a field) on top of that field's own boost, so a true phrase hit outranks a document that
+     * only happens to contain the same words scattered across a field.
+     */
+    private static final float PHRASE_MATCH_BOOST = 2.0f;
 
     private final ElasticsearchClient elasticsearchClient;
 
@@ -79,10 +88,10 @@ public class MovieSearchService {
     }
 
     /**
-     * Builds the text-relevance query (must) plus any exact-match filters (genre, minimum
-     * rating), so the two behave like the postgres-backed browse endpoint's combinable filters
-     * ({@link com.movierec.backend.repository.MovieSpecifications}) rather than the ES text
-     * match silently ignoring them.
+     * Builds the text-relevance query (must + should) plus any exact-match filters (genre,
+     * minimum rating), so the two behave like the postgres-backed browse endpoint's combinable
+     * filters ({@link com.movierec.backend.repository.MovieSpecifications}) rather than the ES
+     * text match silently ignoring them.
      */
     private Query buildQuery(String query, String genre, BigDecimal minRating) {
         List<Query> filters = new ArrayList<>();
@@ -94,10 +103,34 @@ public class MovieSearchService {
                     Query.of(q -> q.range(r -> r.number(n -> n.field("averageRating").gte(minRating.doubleValue())))));
         }
 
+        // FIX: multi_match with the default OR operator let a doc match on just one query word
+        // via any single field, so with title boosted 10x, unrelated/fuzzy-matched titles (e.g.
+        // "Back to the Future" fuzzy-matching "black") buried docs that only matched through both
+        // words appearing in the unboosted overview -- "Captain America: The Winter Soldier"
+        // wasn't surfacing for "black widow" even though its overview mentions Black Widow.
+        // operator(AND) requires every term in a field before it counts; the phraseMatch "should"
+        // then re-ranks literal phrase hits above docs that only satisfy AND via scattered words.
+        Query allTermsMatch =
+                Query.of(
+                        q ->
+                                q.multiMatch(
+                                        mm ->
+                                                mm.query(query)
+                                                        .fields(BOOSTED_FIELDS)
+                                                        .operator(Operator.And)
+                                                        .fuzziness("AUTO")));
+        Query phraseMatch =
+                Query.of(
+                        q ->
+                                q.multiMatch(
+                                        mm ->
+                                                mm.query(query)
+                                                        .fields(BOOSTED_FIELDS)
+                                                        .type(TextQueryType.Phrase)
+                                                        .boost(PHRASE_MATCH_BOOST)));
+
         BoolQuery.Builder boolQuery =
-                new BoolQuery.Builder()
-                        .must(m -> m.multiMatch(mm -> mm.query(query).fields(BOOSTED_FIELDS).fuzziness("AUTO")))
-                        .filter(filters);
+                new BoolQuery.Builder().must(allTermsMatch).should(phraseMatch).filter(filters);
 
         return Query.of(q -> q.bool(boolQuery.build()));
     }
