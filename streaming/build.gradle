@@ -1,0 +1,52 @@
+plugins {
+	id 'java'
+	id 'application'
+	id 'com.gradleup.shadow' version '8.3.6'
+}
+
+group = 'com.movierec'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		// Flink 2.2's default/recommended runtime is Java 17 -- Java 21 support there is still
+		// experimental, so this module intentionally doesn't match the backend's Java 21
+		// toolchain to avoid Flink compatibility surprises.
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+ext {
+	flinkVersion = '2.2.1'
+}
+
+dependencies {
+	// compileOnly: the Flink cluster's own lib/ already provides these at runtime -- bundling
+	// them into the submitted jar would bloat it and risk classloader conflicts with the
+	// cluster's own copies. Connector deps added in later phases (Kafka, JDBC) are NOT provided
+	// by the cluster and do need to be shadowJar-bundled.
+	compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
+	compileOnly "org.apache.flink:flink-clients:${flinkVersion}"
+
+	testImplementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
+	testImplementation "org.apache.flink:flink-clients:${flinkVersion}"
+	testImplementation platform('org.junit:junit-bom:5.11.0')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+	mainClass = 'com.movierec.streaming.HelloWorldJob'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+tasks.named('shadowJar') {
+	archiveClassifier.set('')
+}

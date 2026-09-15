@@ -140,6 +140,29 @@ services:
     depends_on:
       - prometheus
 
+  flink-jobmanager:
+    image: flink:2.2.1-java17
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      # Phase 0: lets `flink run` inside this container see jars built on the host without
+      # rebuilding the image -- ./streaming/build/libs is where Gradle's shadowJar output lands.
+      - ./streaming/build/libs:/opt/streaming-jobs
+
+  flink-taskmanager:
+    image: flink:2.2.1-java17
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    depends_on:
+      - flink-jobmanager
+
   frontend:
     build:
       context: ./frontend
