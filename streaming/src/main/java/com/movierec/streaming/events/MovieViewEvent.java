@@ -1,4 +1,4 @@
-package com.movierec.streaming;
+package com.movierec.streaming.events;
 
 /**
  * Mirrors {@code com.movierec.backend.event.MovieViewEvent} -- the JSON payload the backend

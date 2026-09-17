@@ -1,7 +1,12 @@
-package com.movierec.streaming;
+package com.movierec.streaming.scoring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.movierec.streaming.events.MovieViewEvent;
+import com.movierec.streaming.events.ScoredCandidate;
+import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.similarity.FakeMovieSimilarityLookup;
+import com.movierec.streaming.similarity.MovieSimilarityLookup;
 import java.util.List;
 import java.util.Map;
 import org.apache.flink.api.common.ExecutionConfig;

@@ -1,4 +1,4 @@
-package com.movierec.streaming;
+package com.movierec.streaming.events;
 
 /**
  * A per-user recommendation candidate produced by a window's aggregation, shaped to match

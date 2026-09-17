@@ -1,5 +1,6 @@
-package com.movierec.streaming;
+package com.movierec.streaming.similarity;
 
+import com.movierec.streaming.events.ScoredNeighbor;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;

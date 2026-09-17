@@ -1,5 +1,6 @@
-package com.movierec.streaming;
+package com.movierec.streaming.scoring;
 
+import com.movierec.streaming.events.ScoredNeighbor;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,7 +26,7 @@ public final class CandidateScorer {
             for (ScoredNeighbor neighbor : neighborsByViewedMovie.getOrDefault(viewedMovieId, List.of())) {
                 if (!viewedMovieIds.contains(neighbor.similarMovieId())) {
                     candidateSimilarityScores
-                            .computeIfAbsent(neighbor.similarMovieId(), unused -> new ArrayList<>())
+                            .computeIfAbsent(neighbor.similarMovieId(), v -> new ArrayList<>())
                             .add(neighbor.score());
                 }
             }

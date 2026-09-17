@@ -1,9 +1,10 @@
-package com.movierec.streaming;
+package com.movierec.streaming.scoring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.movierec.streaming.events.ScoredNeighbor;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;

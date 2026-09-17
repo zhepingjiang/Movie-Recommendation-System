@@ -1,6 +1,9 @@
 package com.movierec.streaming;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.movierec.streaming.events.MovieViewEvent;
+import com.movierec.streaming.scoring.UserWindowedCandidateScorer;
+import com.movierec.streaming.similarity.JdbcMovieSimilarityLookup;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;

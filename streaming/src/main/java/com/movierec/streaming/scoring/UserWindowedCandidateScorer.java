@@ -1,5 +1,9 @@
-package com.movierec.streaming;
+package com.movierec.streaming.scoring;
 
+import com.movierec.streaming.events.MovieViewEvent;
+import com.movierec.streaming.events.ScoredCandidate;
+import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.similarity.MovieSimilarityLookup;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;

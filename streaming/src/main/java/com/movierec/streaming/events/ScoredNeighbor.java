@@ -1,4 +1,4 @@
-package com.movierec.streaming;
+package com.movierec.streaming.events;
 
 /**
  * One row from {@code movie_similarity_cache}: a movie similar to the one that was looked up,
