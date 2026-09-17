@@ -1,8 +1,10 @@
 package com.movierec.streaming.similarity;
 
 import com.movierec.streaming.events.ScoredNeighbor;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * In-memory {@link MovieSimilarityLookup} for tests, avoiding a real Postgres connection. Public
@@ -17,7 +19,11 @@ public class FakeMovieSimilarityLookup implements MovieSimilarityLookup {
     }
 
     @Override
-    public List<ScoredNeighbor> findTopSimilarMovies(long movieId) {
-        return neighborsByMovieId.getOrDefault(movieId, List.of());
+    public Map<Long, List<ScoredNeighbor>> findTopSimilarMovies(Set<Long> movieIds) {
+        Map<Long, List<ScoredNeighbor>> result = new HashMap<>();
+        for (Long movieId : movieIds) {
+            result.put(movieId, neighborsByMovieId.getOrDefault(movieId, List.of()));
+        }
+        return result;
     }
 }

@@ -3,7 +3,7 @@ package com.movierec.streaming;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.movierec.streaming.events.MovieViewEvent;
 import com.movierec.streaming.scoring.UserWindowedCandidateScorer;
-import com.movierec.streaming.similarity.JdbcMovieSimilarityLookup;
+import com.movierec.streaming.similarity.CachedMovieSimilarityLookup;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -91,7 +91,7 @@ public class MovieViewEventLoggerJob {
                 .keyBy(MovieViewEvent::userId)
                 .window(SlidingEventTimeWindows.of(WINDOW_SIZE, WINDOW_SLIDE))
                 .process(new UserWindowedCandidateScorer(
-                        new JdbcMovieSimilarityLookup(POSTGRES_JDBC_URL, POSTGRES_USERNAME, POSTGRES_PASSWORD)))
+                        new CachedMovieSimilarityLookup(POSTGRES_JDBC_URL, POSTGRES_USERNAME, POSTGRES_PASSWORD)))
                 .print();
 
         env.execute("movie-view-event-logger-job");

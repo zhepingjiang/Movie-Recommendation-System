@@ -44,9 +44,10 @@ class UserWindowedCandidateScorerTest {
         try {
             testHarness.open();
 
-            long baseTimeMillis = 0L;
-            testHarness.processElement(new MovieViewEvent(1L, 42L, baseTimeMillis), baseTimeMillis);
-            testHarness.processElement(new MovieViewEvent(2L, 42L, baseTimeMillis + 1_000L), baseTimeMillis + 1_000L);
+            long movie1ViewTimestampMillis = 0L;
+            long movie2ViewTimestampMillis = 1_000L;
+            testHarness.processElement(new MovieViewEvent(1L, 42L, movie1ViewTimestampMillis), movie1ViewTimestampMillis);
+            testHarness.processElement(new MovieViewEvent(2L, 42L, movie2ViewTimestampMillis), movie2ViewTimestampMillis);
             // With size=10min/slide=1min, an event at t=0 falls into 10 overlapping windows;
             // the earliest-ending one closes at exactly one slide interval (1min). Advancing the
             // watermark just past that fires only that single window, not all 10.
@@ -58,7 +59,20 @@ class UserWindowedCandidateScorerTest {
             Map<Long, Double> scoreByMovieId = scoredCandidates.stream()
                     .collect(java.util.stream.Collectors.toMap(ScoredCandidate::movieId, ScoredCandidate::score));
             assertEquals(42L, scoredCandidates.get(0).userId());
-            assertEquals(0.7, scoreByMovieId.get(10L), 1e-9);
+
+            // The fired window's end (must match UserWindowedCandidateScorer.RECENCY_HALF_LIFE's
+            // 3-minute half-life -- no shared source of truth between the two, same tradeoff as
+            // MODEL_VERSION elsewhere) is the decay reference point, not either view's own
+            // timestamp, so recompute the same weights here rather than hand-picking round numbers.
+            double halfLifeMillis = java.time.Duration.ofMinutes(3).toMillis();
+            double movie1DecayWeight = Math.pow(2, -(WINDOW_SLIDE_MILLIS - movie1ViewTimestampMillis) / halfLifeMillis);
+            double movie2DecayWeight = Math.pow(2, -(WINDOW_SLIDE_MILLIS - movie2ViewTimestampMillis) / halfLifeMillis);
+            double expectedScoreFor10 =
+                    (0.8 * movie1DecayWeight + 0.6 * movie2DecayWeight) / (movie1DecayWeight + movie2DecayWeight);
+
+            assertEquals(expectedScoreFor10, scoreByMovieId.get(10L), 1e-9);
+            // Only movie1 neighbors movie 20, so its weight cancels out of the weighted average --
+            // still exactly its raw score regardless of decay.
             assertEquals(0.4, scoreByMovieId.get(20L), 1e-9);
         } finally {
             testHarness.close();

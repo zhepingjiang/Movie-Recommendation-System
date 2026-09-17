@@ -37,6 +37,11 @@ dependencies {
 	// JDBC driver for the movie_similarity_cache lookup -- not in the Flink cluster's lib/, so
 	// (like the Kafka connector above) it needs to be shadowJar-bundled.
 	implementation 'org.postgresql:postgresql:42.7.4'
+	// Bounded (size + TTL) local cache in front of the JDBC lookup -- the same building block
+	// Flink's own Table API "PARTIAL" lookup-cache mode uses internally, chosen over a full
+	// in-memory preload of movie_similarity_cache so memory use is capped by policy rather than
+	// by however large that table grows.
+	implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
 
 	testImplementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
 	testImplementation "org.apache.flink:flink-clients:${flinkVersion}"
