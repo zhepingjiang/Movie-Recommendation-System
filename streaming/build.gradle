@@ -34,9 +34,16 @@ dependencies {
 
 	implementation 'org.apache.flink:flink-connector-kafka:5.0.0-2.2'
 	implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
+	// JDBC driver for the movie_similarity_cache lookup -- not in the Flink cluster's lib/, so
+	// (like the Kafka connector above) it needs to be shadowJar-bundled.
+	implementation 'org.postgresql:postgresql:42.7.4'
 
 	testImplementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
 	testImplementation "org.apache.flink:flink-clients:${flinkVersion}"
+	// Flink's operator/window test harness (KeyedOneInputStreamOperatorTestHarness etc.) -- lets
+	// tests feed synthetic events with controlled timestamps/watermarks and assert on window
+	// firing, rather than calling window functions directly and skipping Flink's own windowing.
+	testImplementation "org.apache.flink:flink-test-utils:${flinkVersion}"
 	testImplementation platform('org.junit:junit-bom:5.11.0')
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
