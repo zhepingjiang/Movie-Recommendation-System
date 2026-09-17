@@ -27,10 +27,13 @@ ext {
 dependencies {
 	// compileOnly: the Flink cluster's own lib/ already provides these at runtime -- bundling
 	// them into the submitted jar would bloat it and risk classloader conflicts with the
-	// cluster's own copies. Connector deps added in later phases (Kafka, JDBC) are NOT provided
-	// by the cluster and do need to be shadowJar-bundled.
+	// cluster's own copies. Connector deps (Kafka here, JDBC in a later phase) are NOT provided
+	// by the cluster and do need to be shadowJar-bundled, so they're implementation, not compileOnly.
 	compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
 	compileOnly "org.apache.flink:flink-clients:${flinkVersion}"
+
+	implementation 'org.apache.flink:flink-connector-kafka:5.0.0-2.2'
+	implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
 
 	testImplementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
 	testImplementation "org.apache.flink:flink-clients:${flinkVersion}"
@@ -40,7 +43,13 @@ dependencies {
 }
 
 application {
-	mainClass = 'com.movierec.streaming.HelloWorldJob'
+	mainClass = 'com.movierec.streaming.MovieViewEventLoggerJob'
+}
+
+tasks.named('compileJava') {
+	// Jackson deserializes MovieViewEvent (a record) by matching constructor parameter names --
+	// without -parameters, compiled records lose those names and deserialization fails.
+	options.compilerArgs << '-parameters'
 }
 
 tasks.named('test') {
