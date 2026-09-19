@@ -144,6 +144,19 @@ services:
     depends_on:
       - prometheus
 
+  # FIX: docker names volumes root-owned on first creation, but flink-jobmanager/flink-taskmanager
+  # run as the image's built-in "flink" user (uid 9999), not root -- without this, Flink's
+  # checkpoint coordinator fails to start with "Failed to create directory for shared state"
+  # (verified: `docker compose exec flink-jobmanager ls -la /opt/flink-checkpoints` showed
+  # `root root` ownership, and a job submit failed with exactly that IOException). This one-shot
+  # container chowns the shared volume to uid 9999 before either Flink service starts.
+  flink-checkpoints-init:
+    image: flink:2.2.1-java17
+    user: root
+    entrypoint: ["sh", "-c", "chown -R 9999:9999 /opt/flink-checkpoints"]
+    volumes:
+      - flink_checkpoints:/opt/flink-checkpoints
+
   flink-jobmanager:
     image: flink:2.2.1-java17
     command: jobmanager
@@ -156,6 +169,15 @@ services:
       # Phase 0: lets `flink run` inside this container see jars built on the host without
       # rebuilding the image -- ./streaming/build/libs is where Gradle's shadowJar output lands.
       - ./streaming/build/libs:/opt/streaming-jobs
+      # FIX: MovieViewEventLoggerJob now checkpoints to file:///opt/flink-checkpoints
+      # (application.properties' flink.checkpoint.dir), but that path needs to be durable and
+      # visible to both the jobmanager and the taskmanager -- neither container had any shared
+      # volume before, so checkpoint state written by one wouldn't be readable by the other (or
+      # survive a container recreate) without this.
+      - flink_checkpoints:/opt/flink-checkpoints
+    depends_on:
+      flink-checkpoints-init:
+        condition: service_completed_successfully
 
   flink-taskmanager:
     image: flink:2.2.1-java17
@@ -164,8 +186,15 @@ services:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 2
+    volumes:
+      # FIX: see flink-jobmanager's matching mount -- same shared checkpoint directory, needed on
+      # this side too since checkpoint data is actually written from the taskmanager.
+      - flink_checkpoints:/opt/flink-checkpoints
     depends_on:
-      - flink-jobmanager
+      flink-jobmanager:
+        condition: service_started
+      flink-checkpoints-init:
+        condition: service_completed_successfully
 
   frontend:
     build:
@@ -189,3 +218,4 @@ volumes:
   elasticsearch_data:
   prometheus_data:
   grafana_data:
+  flink_checkpoints:

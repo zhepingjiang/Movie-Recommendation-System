@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.movierec.streaming.events.MovieViewEvent;
 import com.movierec.streaming.events.ScoredCandidate;
+import com.movierec.streaming.events.ScoredCandidateBatch;
 import com.movierec.streaming.events.ScoredNeighbor;
 import com.movierec.streaming.similarity.FakeMovieSimilarityLookup;
 import com.movierec.streaming.similarity.MovieSimilarityLookup;
@@ -39,7 +40,7 @@ class UserWindowedCandidateScorerTest {
                 1L, List.of(new ScoredNeighbor(10L, 0.8), new ScoredNeighbor(20L, 0.4)),
                 2L, List.of(new ScoredNeighbor(10L, 0.6))));
 
-        KeyedOneInputStreamOperatorTestHarness<Long, MovieViewEvent, ScoredCandidate> testHarness =
+        KeyedOneInputStreamOperatorTestHarness<Long, MovieViewEvent, ScoredCandidateBatch> testHarness =
                 createTestHarness(similarityLookup);
         try {
             testHarness.open();
@@ -53,12 +54,18 @@ class UserWindowedCandidateScorerTest {
             // watermark just past that fires only that single window, not all 10.
             testHarness.processWatermark(new Watermark(WINDOW_SLIDE_MILLIS + 1));
 
-            List<ScoredCandidate> scoredCandidates = testHarness.extractOutputValues();
+            List<ScoredCandidateBatch> scoredCandidateBatches = testHarness.extractOutputValues();
 
+            // One window firing for user 42 -> exactly one batch, carrying both candidates.
+            assertEquals(1, scoredCandidateBatches.size());
+            ScoredCandidateBatch scoredCandidateBatch = scoredCandidateBatches.get(0);
+            assertEquals(42L, scoredCandidateBatch.userId());
+            assertEquals(WINDOW_SLIDE_MILLIS, scoredCandidateBatch.windowEndEpochMilli());
+
+            List<ScoredCandidate> scoredCandidates = scoredCandidateBatch.candidates();
             assertEquals(2, scoredCandidates.size());
             Map<Long, Double> scoreByMovieId = scoredCandidates.stream()
                     .collect(java.util.stream.Collectors.toMap(ScoredCandidate::movieId, ScoredCandidate::score));
-            assertEquals(42L, scoredCandidates.get(0).userId());
 
             // The fired window's end (must match UserWindowedCandidateScorer.RECENCY_HALF_LIFE's
             // 3-minute half-life -- no shared source of truth between the two, same tradeoff as
@@ -79,7 +86,7 @@ class UserWindowedCandidateScorerTest {
         }
     }
 
-    private static KeyedOneInputStreamOperatorTestHarness<Long, MovieViewEvent, ScoredCandidate> createTestHarness(
+    private static KeyedOneInputStreamOperatorTestHarness<Long, MovieViewEvent, ScoredCandidateBatch> createTestHarness(
             MovieSimilarityLookup similarityLookup) throws Exception {
         KeySelector<MovieViewEvent, Long> userIdKeySelector = MovieViewEvent::userId;
 
@@ -92,7 +99,7 @@ class UserWindowedCandidateScorerTest {
                 userIdKeySelector,
                 Types.LONG);
 
-        OneInputStreamOperator<MovieViewEvent, ScoredCandidate> windowOperator =
+        OneInputStreamOperator<MovieViewEvent, ScoredCandidateBatch> windowOperator =
                 windowOperatorBuilder.process(new UserWindowedCandidateScorer(similarityLookup));
 
         return new KeyedOneInputStreamOperatorTestHarness<>(windowOperator, userIdKeySelector, Types.LONG);
