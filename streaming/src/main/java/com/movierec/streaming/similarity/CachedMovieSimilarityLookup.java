@@ -2,7 +2,7 @@ package com.movierec.streaming.similarity;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.DriverManager;

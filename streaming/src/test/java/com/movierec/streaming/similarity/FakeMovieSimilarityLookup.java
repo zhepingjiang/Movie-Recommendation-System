@@ -1,6 +1,6 @@
 package com.movierec.streaming.similarity;
 
-import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

@@ -2,10 +2,10 @@ package com.movierec.streaming.scoring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.movierec.streaming.dto.ScoredCandidate;
+import com.movierec.streaming.dto.ScoredCandidateBatch;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import com.movierec.streaming.events.MovieViewEvent;
-import com.movierec.streaming.events.ScoredCandidate;
-import com.movierec.streaming.events.ScoredCandidateBatch;
-import com.movierec.streaming.events.ScoredNeighbor;
 import com.movierec.streaming.similarity.FakeMovieSimilarityLookup;
 import com.movierec.streaming.similarity.MovieSimilarityLookup;
 import java.util.List;

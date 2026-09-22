@@ -1,9 +1,9 @@
 package com.movierec.streaming.scoring;
 
+import com.movierec.streaming.dto.ScoredCandidate;
+import com.movierec.streaming.dto.ScoredCandidateBatch;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import com.movierec.streaming.events.MovieViewEvent;
-import com.movierec.streaming.events.ScoredCandidate;
-import com.movierec.streaming.events.ScoredCandidateBatch;
-import com.movierec.streaming.events.ScoredNeighbor;
 import com.movierec.streaming.similarity.MovieSimilarityLookup;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -19,7 +19,7 @@ import org.apache.flink.util.Collector;
  * window of {@link MovieViewEvent}s, looks up each viewed movie's cached neighbors, scores
  * candidates via {@link CandidateScorer} (recency-decayed, using the window's end as the decay
  * reference point -- deterministic and replay-safe, unlike wall-clock time), and emits the top
- * {@link #TOP_CANDIDATES_PER_USER} as a single {@link com.movierec.streaming.events.ScoredCandidateBatch}
+ * {@link #TOP_CANDIDATES_PER_USER} as a single {@link com.movierec.streaming.dto.ScoredCandidateBatch}
  * -- one per user per window firing, so the JDBC sink can replace that user's prior candidates
  * atomically instead of accumulating on top of them.
  */
@@ -67,7 +67,7 @@ public class UserWindowedCandidateScorer
         scoredCandidates.entrySet().stream()
                 .sorted(Map.Entry.<Long, Double>comparingByValue().reversed())
                 .limit(TOP_CANDIDATES_PER_USER)
-                .forEach(entry -> topCandidates.add(new ScoredCandidate(userId, entry.getKey(), entry.getValue())));
+                .forEach(entry -> topCandidates.add(new ScoredCandidate(entry.getKey(), entry.getValue())));
 
         out.collect(new ScoredCandidateBatch(userId, context.window().getEnd(), topCandidates));
     }

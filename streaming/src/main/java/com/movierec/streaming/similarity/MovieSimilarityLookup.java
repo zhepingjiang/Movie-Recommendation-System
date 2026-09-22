@@ -1,6 +1,6 @@
 package com.movierec.streaming.similarity;
 
-import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import com.movierec.streaming.scoring.UserWindowedCandidateScorer;
 import java.io.Serializable;
 import java.util.List;

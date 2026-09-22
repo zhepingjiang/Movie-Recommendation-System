@@ -3,6 +3,7 @@ package com.movierec.streaming;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.RestartStrategyOptions;
@@ -44,5 +45,23 @@ class MovieViewEventLoggerJobTest {
         ReadableConfig configuration = env.getConfiguration();
         assertEquals(EXPECTED_RESTART_STRATEGY, configuration.get(RestartStrategyOptions.RESTART_STRATEGY));
         assertEquals(EXPECTED_CHECKPOINT_DIRECTORY, configuration.get(CheckpointingOptions.CHECKPOINTS_DIRECTORY));
+
+        assertEquals(
+                Duration.ofSeconds(1),
+                configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_INITIAL_BACKOFF));
+        assertEquals(
+                Duration.ofMinutes(1),
+                configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_MAX_BACKOFF));
+        assertEquals(
+                1.5, configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_BACKOFF_MULTIPLIER));
+        assertEquals(
+                Duration.ofHours(1),
+                configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_RESET_BACKOFF_THRESHOLD));
+        assertEquals(
+                0.1, configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_JITTER_FACTOR));
+        // Not Flink's default (infinite) -- the whole point of setting this one is a finite
+        // ceiling so a permanent failure eventually surfaces as FAILED instead of restarting
+        // forever.
+        assertEquals(10, configuration.get(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_ATTEMPTS));
     }
 }

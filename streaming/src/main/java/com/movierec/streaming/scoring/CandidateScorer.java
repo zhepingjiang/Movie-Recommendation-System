@@ -1,6 +1,6 @@
 package com.movierec.streaming.scoring;
 
-import com.movierec.streaming.events.ScoredNeighbor;
+import com.movierec.streaming.dto.ScoredNeighbor;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;

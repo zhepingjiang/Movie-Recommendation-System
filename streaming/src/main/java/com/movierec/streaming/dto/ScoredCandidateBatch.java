@@ -1,4 +1,4 @@
-package com.movierec.streaming.events;
+package com.movierec.streaming.dto;
 
 import java.util.List;
 

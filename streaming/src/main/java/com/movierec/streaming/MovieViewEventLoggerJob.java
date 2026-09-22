@@ -96,6 +96,24 @@ public class MovieViewEventLoggerJob {
         Configuration configuration = new Configuration();
         configuration.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, FLINK_CHECKPOINT_DIRECTORY);
         configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "exponential-delay");
+        // Pinned explicitly rather than left as Flink's unstated defaults -- same values Flink
+        // 2.2.1 already defaults to, just visible here and immune to a future Flink upgrade
+        // quietly changing what "default" means.
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_INITIAL_BACKOFF, Duration.ofSeconds(1));
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_MAX_BACKOFF, Duration.ofMinutes(1));
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_BACKOFF_MULTIPLIER, 1.5);
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_RESET_BACKOFF_THRESHOLD, Duration.ofHours(1));
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_JITTER_FACTOR, 0.1);
+        // FIX: unlike the above, this one is NOT Flink's default (which is unbounded/infinite
+        // retries) -- without a ceiling, a permanent failure (bad credentials, schema drift, a
+        // genuinely poison write) crash-loops the job forever instead of ever surfacing as
+        // failed, since it looks identical to a transient blip that will self-heal. 10
+        // consecutive failures without an intervening RESET_BACKOFF_THRESHOLD-long stretch of
+        // healthy running is enough tolerance for a string of transient Postgres/Kafka hiccups,
+        // capped by MAX_BACKOFF between each, before giving up and going to FAILED -- which
+        // today needs manual investigation/resubmission (tracked as a follow-up to add
+        // monitoring/alerting on job failure).
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_ATTEMPTS, 10);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         // FIX: see above -- without this, nothing ever checkpoints the window operator's state
