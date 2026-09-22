@@ -29,8 +29,14 @@ spring:
       group-id: movie-rec-backend
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # FIX: JsonDeserializer used directly throws inside poll(), before the listener's error
+      # handler can act, so one unparseable record (e.g. a headerless message published by hand
+      # with kafka-console-producer) was retried forever and blocked the whole partition.
+      # ErrorHandlingDeserializer turns it into a DeserializationException the default error
+      # handler logs once and skips.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.movierec.backend.event
   data:
     redis:
@@ -75,3 +81,16 @@ recommendation:
     # docker-compose.
     host: ${RECOMMENDATION_SERVICE_HOST:localhost}
     port: ${RECOMMENDATION_SERVICE_PORT:50051}
+  # Request-time merge of the Flink job's nearline_v1 rows into blended_v1 (see
+  # NearlineRecommendationBlender). Hand-set starting values, not tuned -- the offline NDCG grid
+  # search only has rating holdouts, which can't judge minutes-scale view signal. Tuning these
+  # needs persisted view history (session replay, next-view hit rate) or online A/B.
+  nearline:
+    # Nearline weight halves every half-life since the batch's generated_at. ~5 Flink window
+    # slides of inactivity before a session's influence is halved.
+    freshness-half-life: PT15M
+    # Weight of a just-written nearline batch; blended_v1 always keeps at least half the say.
+    max-weight: 0.5
+    # Rows older than this are skipped in SQL entirely (weight is ~0.4% of max by then). The
+    # offline blend also wipes all nearline_v1 rows on every run.
+    max-age: PT2H

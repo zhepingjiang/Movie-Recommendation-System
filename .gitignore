@@ -39,3 +39,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# JVM heap dumps (written on OutOfMemoryError, e.g. by the Gradle daemon)
+*.hprof

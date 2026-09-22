@@ -2,6 +2,7 @@ package com.movierec.backend.repository;
 
 import com.movierec.backend.entity.RecommendationCache;
 import com.movierec.backend.entity.RecommendationCacheId;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -20,4 +21,11 @@ public interface RecommendationCacheRepository
      */
     List<RecommendationCache> findByIdUserIdAndIdModelVersionOrderByScoreDesc(
             Long userId, String modelVersion, Pageable pageable);
+
+    /**
+     * Same as above, restricted to rows generated after {@code generatedAfter} -- used to skip
+     * nearline rows too old to still carry meaningful weight without loading them first.
+     */
+    List<RecommendationCache> findByIdUserIdAndIdModelVersionAndGeneratedAtAfterOrderByScoreDesc(
+            Long userId, String modelVersion, Instant generatedAfter, Pageable pageable);
 }

@@ -11,6 +11,7 @@ import models.recommendation_blending as recommendation_blending
 from models.recommendation_blending import (
     blend_all_users,
     blend_scores,
+    delete_nearline_recommendations,
     effective_alpha,
     item_confidence,
     load_cached_scores,
@@ -22,19 +23,22 @@ from models.recommendation_blending import (
 
 
 class FakeCursor:
-    def __init__(self, results):
+    def __init__(self, results, rowcount=0):
         self._results = results
         self._index = -1
+        self.rowcount = rowcount
+        self.executed = []
 
     def execute(self, query, params=None):
         self._index += 1
+        self.executed.append((query, params))
 
     def fetchall(self):
         return self._results[self._index]
 
 
-def _patch_cursor(monkeypatch, results):
-    fake_cursor = FakeCursor(results)
+def _patch_cursor(monkeypatch, results, rowcount=0):
+    fake_cursor = FakeCursor(results, rowcount)
 
     @contextmanager
     def fake_get_cursor():
@@ -161,6 +165,15 @@ class TestLoaders:
         assert load_movie_rating_counts() == {10: 3}
 
 
+def test_delete_nearline_recommendations_wipes_only_nearline_rows(monkeypatch):
+    fake_cursor = _patch_cursor(monkeypatch, [], rowcount=7)
+
+    assert delete_nearline_recommendations() == 7
+    assert fake_cursor.executed == [
+        ("DELETE FROM recommendation_cache WHERE model_version = %s", ("nearline_v1",))
+    ]
+
+
 def _patch_run_dependencies(monkeypatch, *, svd_scores_by_user, content_scores_by_user):
     mocks = {
         "load_cached_scores": MagicMock(side_effect=lambda model_version: (
@@ -170,6 +183,7 @@ def _patch_run_dependencies(monkeypatch, *, svd_scores_by_user, content_scores_b
         "load_movie_rating_counts": MagicMock(return_value={}),
         "blend_all_users": MagicMock(return_value={}),
         "write_blended_scores_to_postgres": MagicMock(return_value=0),
+        "delete_nearline_recommendations": MagicMock(return_value=0),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(recommendation_blending, name, mock)
@@ -183,6 +197,7 @@ def test_run_returns_early_when_neither_model_has_cached_scores(monkeypatch, cap
 
     mocks["blend_all_users"].assert_not_called()
     mocks["write_blended_scores_to_postgres"].assert_not_called()
+    mocks["delete_nearline_recommendations"].assert_not_called()
     assert "nothing to blend" in capsys.readouterr().out
 
 
@@ -208,3 +223,14 @@ def test_run_full_happy_path_wires_everything(monkeypatch):
     assert pg_args[0] == blended
     assert pg_args[1] == recommendation_blending.MODEL_VERSION
     assert isinstance(pg_args[2], datetime)
+
+
+def test_run_clears_nearline_only_after_the_blend_is_persisted(monkeypatch):
+    mocks = _patch_run_dependencies(monkeypatch, svd_scores_by_user={1: {10: 4.5}}, content_scores_by_user={})
+    call_order = []
+    mocks["write_blended_scores_to_postgres"].side_effect = lambda *args: call_order.append("write") or 1
+    mocks["delete_nearline_recommendations"].side_effect = lambda: call_order.append("delete_nearline") or 3
+
+    recommendation_blending.run()
+
+    assert call_order == ["write", "delete_nearline"]

@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 MODEL_VERSION = "blended_v1"
 SVD_MODEL_VERSION = "svd_v1"
 CONTENT_MODEL_VERSION = "content_v1"
+# Written by the streaming/ Flink job; merged with MODEL_VERSION at request time by the backend.
+NEARLINE_MODEL_VERSION = "nearline_v1"
 
 # First-cut defaults -- see evaluation/evaluate_models.py's grid search for how these are chosen.
 N0 = 10
@@ -192,6 +194,18 @@ def write_blended_scores_to_postgres(
     return len(rows)
 
 
+def delete_nearline_recommendations() -> int:
+    """Wipes every nearline_v1 row. A nearline batch is only rewritten while its user is actively
+    viewing, so an idle user's last batch would otherwise sit in the table forever -- clearing
+    the whole model_version on each offline refresh bounds that without guessing an idle TTL.
+    The backend already fades these rows out by generated_at age, so this is table hygiene, not
+    a correctness requirement. Active users get a fresh batch on their next window firing.
+    Runs in its own transaction after the blend commits, so a failure here never loses a blend."""
+    with get_cursor() as cursor:
+        cursor.execute(_DELETE_RECOMMENDATION_CACHE_SQL, (NEARLINE_MODEL_VERSION,))
+        return cursor.rowcount
+
+
 def run() -> None:
     # No logging is configured elsewhere in this codebase (every other job just prints) --
     # basicConfig is a no-op if something else already configured the root logger, so this is
@@ -220,3 +234,7 @@ def run() -> None:
     generated_at = datetime.now(timezone.utc)
     persisted = write_blended_scores_to_postgres(blended, MODEL_VERSION, generated_at)
     print(f"  Persisted {persisted} rows.")
+
+    print(f"Clearing nearline recommendations (model_version={NEARLINE_MODEL_VERSION})...")
+    deleted = delete_nearline_recommendations()
+    print(f"  Deleted {deleted} rows.")
