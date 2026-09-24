@@ -92,5 +92,6 @@ recommendation:
     # Weight of a just-written nearline batch; blended_v1 always keeps at least half the say.
     max-weight: 0.5
     # Rows older than this are skipped in SQL entirely (weight is ~0.4% of max by then). The
-    # offline blend also wipes all nearline_v1 rows on every run.
+    # offline blend deletes nearline_v1 rows older than this on every run -- keep in sync with
+    # recommendation_blending.py's NEARLINE_MAX_AGE.
     max-age: PT2H

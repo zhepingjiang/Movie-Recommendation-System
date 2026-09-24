@@ -4,14 +4,17 @@ training jobs' style.
 """
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
+
+import pytest
+from psycopg2.errors import DeadlockDetected
 
 import models.recommendation_blending as recommendation_blending
 from models.recommendation_blending import (
     blend_all_users,
     blend_scores,
-    delete_nearline_recommendations,
+    delete_stale_nearline_recommendations,
     effective_alpha,
     item_confidence,
     load_cached_scores,
@@ -165,13 +168,81 @@ class TestLoaders:
         assert load_movie_rating_counts() == {10: 3}
 
 
-def test_delete_nearline_recommendations_wipes_only_nearline_rows(monkeypatch):
+STALE_BEFORE = datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc)
+
+
+def test_delete_stale_nearline_recommendations_only_deletes_nearline_rows_older_than_cutoff(monkeypatch):
     fake_cursor = _patch_cursor(monkeypatch, [], rowcount=7)
 
-    assert delete_nearline_recommendations() == 7
+    assert delete_stale_nearline_recommendations(STALE_BEFORE) == 7
     assert fake_cursor.executed == [
-        ("DELETE FROM recommendation_cache WHERE model_version = %s", ("nearline_v1",))
+        (
+            "DELETE FROM recommendation_cache WHERE model_version = %s AND generated_at < %s",
+            ("nearline_v1", STALE_BEFORE),
+        )
     ]
+
+
+def _patch_cursor_failing_with_deadlock(monkeypatch, deadlocked_attempt_count, rowcount=0, jitter_multiplier=1.0):
+    """Like _patch_cursor, but the first deadlocked_attempt_count get_cursor() transactions raise
+    DeadlockDetected from execute(), the way psycopg2 surfaces Postgres aborting our side."""
+    attempted_transaction_count = 0
+    sleep_durations = []
+
+    @contextmanager
+    def fake_get_cursor():
+        nonlocal attempted_transaction_count
+        attempted_transaction_count += 1
+        fake_cursor = FakeCursor([], rowcount)
+        if attempted_transaction_count <= deadlocked_attempt_count:
+            fake_cursor.execute = MagicMock(side_effect=DeadlockDetected())
+        yield fake_cursor
+
+    monkeypatch.setattr(recommendation_blending, "get_cursor", fake_get_cursor)
+    monkeypatch.setattr(recommendation_blending.time, "sleep", sleep_durations.append)
+    monkeypatch.setattr(recommendation_blending.random, "uniform", lambda low, high: jitter_multiplier)
+    return lambda: attempted_transaction_count, sleep_durations
+
+
+def test_delete_stale_nearline_recommendations_retries_after_deadlock_with_exponential_backoff(monkeypatch):
+    get_attempted_transaction_count, sleep_durations = _patch_cursor_failing_with_deadlock(
+        monkeypatch, deadlocked_attempt_count=4, rowcount=4
+    )
+
+    assert delete_stale_nearline_recommendations(STALE_BEFORE) == 4
+    assert get_attempted_transaction_count() == 5
+    assert sleep_durations == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_delete_stale_nearline_recommendations_backoff_is_jittered_then_capped(monkeypatch):
+    _, sleep_durations = _patch_cursor_failing_with_deadlock(
+        monkeypatch, deadlocked_attempt_count=4, jitter_multiplier=1.5
+    )
+
+    delete_stale_nearline_recommendations(STALE_BEFORE)
+
+    # 1.5x jitter on 1, 2, 4, 8 -- the last (12s) is capped at NEARLINE_DELETE_RETRY_MAX_BACKOFF_SECONDS.
+    assert sleep_durations == [1.5, 3.0, 6.0, 10.0]
+
+
+def test_nearline_delete_retry_jitter_stays_within_bounds():
+    for failed_attempt_number in range(1, recommendation_blending.NEARLINE_DELETE_MAX_ATTEMPTS):
+        exponential_backoff_seconds = 2 ** (failed_attempt_number - 1)
+        for _ in range(100):
+            backoff_seconds = recommendation_blending._nearline_delete_retry_backoff_seconds(failed_attempt_number)
+            assert 0.5 * exponential_backoff_seconds <= backoff_seconds
+            assert backoff_seconds <= min(10.0, 1.5 * exponential_backoff_seconds)
+
+
+def test_delete_stale_nearline_recommendations_gives_up_after_max_attempts(monkeypatch):
+    get_attempted_transaction_count, sleep_durations = _patch_cursor_failing_with_deadlock(
+        monkeypatch, deadlocked_attempt_count=recommendation_blending.NEARLINE_DELETE_MAX_ATTEMPTS
+    )
+
+    with pytest.raises(DeadlockDetected):
+        delete_stale_nearline_recommendations(STALE_BEFORE)
+    assert get_attempted_transaction_count() == recommendation_blending.NEARLINE_DELETE_MAX_ATTEMPTS
+    assert len(sleep_durations) == recommendation_blending.NEARLINE_DELETE_MAX_ATTEMPTS - 1
 
 
 def _patch_run_dependencies(monkeypatch, *, svd_scores_by_user, content_scores_by_user):
@@ -183,7 +254,7 @@ def _patch_run_dependencies(monkeypatch, *, svd_scores_by_user, content_scores_b
         "load_movie_rating_counts": MagicMock(return_value={}),
         "blend_all_users": MagicMock(return_value={}),
         "write_blended_scores_to_postgres": MagicMock(return_value=0),
-        "delete_nearline_recommendations": MagicMock(return_value=0),
+        "delete_stale_nearline_recommendations": MagicMock(return_value=0),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(recommendation_blending, name, mock)
@@ -197,7 +268,7 @@ def test_run_returns_early_when_neither_model_has_cached_scores(monkeypatch, cap
 
     mocks["blend_all_users"].assert_not_called()
     mocks["write_blended_scores_to_postgres"].assert_not_called()
-    mocks["delete_nearline_recommendations"].assert_not_called()
+    mocks["delete_stale_nearline_recommendations"].assert_not_called()
     assert "nothing to blend" in capsys.readouterr().out
 
 
@@ -229,8 +300,21 @@ def test_run_clears_nearline_only_after_the_blend_is_persisted(monkeypatch):
     mocks = _patch_run_dependencies(monkeypatch, svd_scores_by_user={1: {10: 4.5}}, content_scores_by_user={})
     call_order = []
     mocks["write_blended_scores_to_postgres"].side_effect = lambda *args: call_order.append("write") or 1
-    mocks["delete_nearline_recommendations"].side_effect = lambda: call_order.append("delete_nearline") or 3
+    mocks["delete_stale_nearline_recommendations"].side_effect = (
+        lambda stale_before: call_order.append("delete_nearline") or 3
+    )
 
     recommendation_blending.run()
 
     assert call_order == ["write", "delete_nearline"]
+
+
+def test_run_deletes_nearline_rows_older_than_max_age_relative_to_the_blend(monkeypatch):
+    mocks = _patch_run_dependencies(monkeypatch, svd_scores_by_user={1: {10: 4.5}}, content_scores_by_user={})
+
+    recommendation_blending.run()
+
+    blend_generated_at = mocks["write_blended_scores_to_postgres"].call_args.args[2]
+    mocks["delete_stale_nearline_recommendations"].assert_called_once_with(
+        blend_generated_at - recommendation_blending.NEARLINE_MAX_AGE
+    )

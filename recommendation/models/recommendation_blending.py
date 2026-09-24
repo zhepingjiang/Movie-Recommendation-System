@@ -29,9 +29,12 @@ though nothing else in this codebase uses `logging` (everywhere else just prints
 """
 
 import logging
+import random
+import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from psycopg2.errors import DeadlockDetected
 from psycopg2.extras import execute_values
 
 from db import get_cursor
@@ -43,6 +46,16 @@ SVD_MODEL_VERSION = "svd_v1"
 CONTENT_MODEL_VERSION = "content_v1"
 # Written by the streaming/ Flink job; merged with MODEL_VERSION at request time by the backend.
 NEARLINE_MODEL_VERSION = "nearline_v1"
+# Must match the backend's recommendation.nearline.max-age -- rows older than this are already
+# skipped at request time, so they're the only ones safe to delete without touching a batch the
+# Flink job may be rewriting right now. No shared source of truth, same as MODEL_VERSION.
+NEARLINE_MAX_AGE = timedelta(hours=2)
+# Retries for the stale-nearline delete losing a Postgres deadlock to the Flink sink's own
+# per-user delete+insert. Exponential backoff with +/-50% jitter, capped: ~1s, 2s, 4s, 8s.
+NEARLINE_DELETE_MAX_ATTEMPTS = 5
+NEARLINE_DELETE_RETRY_BASE_BACKOFF_SECONDS = 1.0
+NEARLINE_DELETE_RETRY_MAX_BACKOFF_SECONDS = 10.0
+NEARLINE_DELETE_RETRY_JITTER_FRACTION = 0.5
 
 # First-cut defaults -- see evaluation/evaluate_models.py's grid search for how these are chosen.
 N0 = 10
@@ -52,6 +65,11 @@ _CACHED_SCORES_SQL = "SELECT user_id, movie_id, score FROM recommendation_cache 
 _USER_RATING_COUNTS_SQL = "SELECT user_id, count(*) AS cnt FROM ratings GROUP BY user_id"
 _MOVIE_RATING_COUNTS_SQL = "SELECT movie_id, count(*) AS cnt FROM ratings GROUP BY movie_id"
 _DELETE_RECOMMENDATION_CACHE_SQL = "DELETE FROM recommendation_cache WHERE model_version = %s"
+# FIX: the nearline cleanup reused _DELETE_RECOMMENDATION_CACHE_SQL (every row for the
+# model_version); the generated_at cutoff keeps it off the fresh rows the Flink sink owns.
+_DELETE_STALE_RECOMMENDATION_CACHE_SQL = (
+    "DELETE FROM recommendation_cache WHERE model_version = %s AND generated_at < %s"
+)
 _INSERT_RECOMMENDATION_CACHE_SQL = """
     INSERT INTO recommendation_cache (user_id, movie_id, model_version, score, generated_at)
     VALUES %s
@@ -194,16 +212,51 @@ def write_blended_scores_to_postgres(
     return len(rows)
 
 
-def delete_nearline_recommendations() -> int:
-    """Wipes every nearline_v1 row. A nearline batch is only rewritten while its user is actively
-    viewing, so an idle user's last batch would otherwise sit in the table forever -- clearing
-    the whole model_version on each offline refresh bounds that without guessing an idle TTL.
-    The backend already fades these rows out by generated_at age, so this is table hygiene, not
-    a correctness requirement. Active users get a fresh batch on their next window firing.
-    Runs in its own transaction after the blend commits, so a failure here never loses a blend."""
-    with get_cursor() as cursor:
-        cursor.execute(_DELETE_RECOMMENDATION_CACHE_SQL, (NEARLINE_MODEL_VERSION,))
-        return cursor.rowcount
+def _nearline_delete_retry_backoff_seconds(failed_attempt_number: int) -> float:
+    """base * 2^(failed_attempt_number - 1), randomly scaled by +/-JITTER_FRACTION, then capped --
+    the cap applies after jitter so no single wait ever exceeds MAX_BACKOFF_SECONDS."""
+    exponential_backoff_seconds = NEARLINE_DELETE_RETRY_BASE_BACKOFF_SECONDS * 2 ** (failed_attempt_number - 1)
+    jitter_multiplier = random.uniform(
+        1 - NEARLINE_DELETE_RETRY_JITTER_FRACTION, 1 + NEARLINE_DELETE_RETRY_JITTER_FRACTION
+    )
+    return min(NEARLINE_DELETE_RETRY_MAX_BACKOFF_SECONDS, exponential_backoff_seconds * jitter_multiplier)
+
+
+def delete_stale_nearline_recommendations(stale_before: datetime) -> int:
+    """Deletes nearline_v1 rows generated before stale_before. A nearline batch is only rewritten
+    while its user is actively viewing, so an idle user's last batch would otherwise sit in the
+    table forever. The backend already ignores rows older than NEARLINE_MAX_AGE, so this is table
+    hygiene, not a correctness requirement.
+
+    Only stale rows are touched, so the Flink sink (which only ever writes fresh rows) and this
+    delete almost never contend for the same rows. A Postgres deadlock between the two is still
+    possible in the rare overlap (a user resuming right at the cutoff), and Postgres resolves it
+    by aborting one side -- if that's us, the transaction was rolled back and simply retrying it
+    is safe. Runs in its own transaction after the blend commits, so a failure here never loses
+    a blend."""
+    for attempt_number in range(1, NEARLINE_DELETE_MAX_ATTEMPTS + 1):
+        try:
+            with get_cursor() as cursor:
+                # FIX: used to wipe every nearline_v1 row, including batches the Flink sink had
+                # just written for users active right now (they vanished until the next window
+                # firing), and contended with the sink's own per-user deletes on the same rows,
+                # risking a deadlock. Only stale rows are deleted now.
+                cursor.execute(_DELETE_STALE_RECOMMENDATION_CACHE_SQL, (NEARLINE_MODEL_VERSION, stale_before))
+                return cursor.rowcount
+        # FIX: a deadlock with the Flink sink used to fail the whole run() after the blend had
+        # already committed -- it's a transient, rolled-back conflict, so retry it instead.
+        except DeadlockDetected:
+            if attempt_number == NEARLINE_DELETE_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "Deadlock deleting stale nearline rows (attempt %d/%d), retrying",
+                attempt_number,
+                NEARLINE_DELETE_MAX_ATTEMPTS,
+            )
+            # FIX: back off exponentially (with jitter) before retrying, giving the Flink
+            # transaction that won the deadlock time to commit instead of re-colliding with it.
+            time.sleep(_nearline_delete_retry_backoff_seconds(attempt_number))
+    raise AssertionError("unreachable: the final attempt either returns or re-raises")
 
 
 def run() -> None:
@@ -235,6 +288,12 @@ def run() -> None:
     persisted = write_blended_scores_to_postgres(blended, MODEL_VERSION, generated_at)
     print(f"  Persisted {persisted} rows.")
 
-    print(f"Clearing nearline recommendations (model_version={NEARLINE_MODEL_VERSION})...")
-    deleted = delete_nearline_recommendations()
-    print(f"  Deleted {deleted} rows.")
+    # FIX: used to delete every nearline_v1 row regardless of age -- only rows past the backend's
+    # max-age (already ignored at request time) are deleted now.
+    stale_before = generated_at - NEARLINE_MAX_AGE
+    print(
+        f"Clearing stale nearline recommendations "
+        f"(model_version={NEARLINE_MODEL_VERSION}, generated before {stale_before.isoformat()})..."
+    )
+    deleted_row_count = delete_stale_nearline_recommendations(stale_before)
+    print(f"  Deleted {deleted_row_count} rows.")

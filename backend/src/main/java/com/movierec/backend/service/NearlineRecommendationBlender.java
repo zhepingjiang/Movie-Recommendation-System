@@ -18,7 +18,7 @@ import java.util.Set;
  *
  * <p>Where the offline blend's confidence axis is rating history ({@code effective_alpha}), this
  * one is freshness: nearline rows are only rewritten when a user is actively viewing, so an idle
- * user's last batch sits in {@code recommendation_cache} until the next offline blend wipes it.
+ * user's last batch sits in {@code recommendation_cache} until the next offline blend deletes it as stale.
  * Decaying by {@code generated_at} age makes that leftover batch fade out smoothly instead of
  * dominating the list long after the session that produced it ended.
  */
