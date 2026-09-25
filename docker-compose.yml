@@ -152,11 +152,22 @@ services:
   # without this the first checkpoint fails with NoSuchBucket. --ignore-existing keeps it a
   # no-op on every start after the first. Uses the minio/minio server image (which bundles the
   # `mc` client) rather than minio/mc -- the latter isn't pullable from Docker Hub anymore.
+  #
+  # Also expires checkpoint objects after 7 days. Checkpoints are retained on cancel/failure
+  # (MovieViewEventLoggerJob), so every job submission leaves its last checkpoint behind forever
+  # otherwise. Safe for the running job: Flink keeps only its newest checkpoint (written every
+  # 30s) and, with the default hashmap state backend, every checkpoint is self-contained. Revisit
+  # before switching to RocksDB *incremental* checkpoints -- those reuse files under shared/ that
+  # can be older than 7 days while still referenced, and this rule would delete them.
+  # `mc ilm import` replaces the whole lifecycle config, so re-running it is idempotent (unlike
+  # `mc ilm rule add`, which would stack a duplicate rule on every start).
   flink-checkpoints-bucket-init:
     image: minio/minio:latest
     entrypoint: >
       sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
-             mc mb --ignore-existing local/flink-checkpoints"
+             mc mb --ignore-existing local/flink-checkpoints &&
+             echo '{\"Rules\":[{\"ID\":\"expire-flink-checkpoints-after-7-days\",\"Status\":\"Enabled\",\"Filter\":{\"Prefix\":\"\"},\"Expiration\":{\"Days\":7}}]}' |
+             mc ilm import local/flink-checkpoints"
     depends_on:
       minio:
         condition: service_healthy
