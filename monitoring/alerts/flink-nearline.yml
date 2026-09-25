@@ -1,0 +1,100 @@
+# Alerts for the Flink nearline job (streaming/ MovieViewEventLoggerJob). Grouped by what they
+# protect, following Google SRE's pipeline guidance: freshness first (is new view data reaching
+# recommendation_cache on time?), then errors/completeness, rather than machine-level metrics.
+#
+# Visible at http://localhost:9090/alerts. No Alertmanager yet, so nothing is routed anywhere.
+groups:
+  - name: flink-nearline
+    rules:
+      # --- Availability -------------------------------------------------------------------------
+
+      # Covers the restart strategy giving up (job goes to FAILED after 10 attempts), a cancelled
+      # job that was never resubmitted, and the jobmanager itself being down (absent()).
+      - alert: FlinkNearlineJobNotRunning
+        expr: absent(flink_jobmanager_numRunningJobs) or max(flink_jobmanager_numRunningJobs) < 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Flink nearline job is not running
+          description: >-
+            No running Flink job for over 1 minute, so nearline_v1 recommendations are not being
+            refreshed. Check the Flink UI (localhost:8081) Exceptions tab, then resubmit, from the
+            latest retained checkpoint if there is one (flink run -s s3://flink-checkpoints/nearline/<job-id>/chk-<n> ...).
+
+      # Restarting but not failed yet: probably a dependency (Postgres/Kafka/MinIO) flapping.
+      # Fires well before the 10-attempt cap turns it into FlinkNearlineJobNotRunning.
+      - alert: FlinkNearlineJobRestartLoop
+        expr: increase(flink_jobmanager_job_numRestarts[10m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: Flink nearline job restarted {{ $value | humanize }} times in 10 minutes
+
+      # --- Recovery point (checkpoints) ---------------------------------------------------------
+
+      - alert: FlinkNearlineCheckpointFailing
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Flink nearline checkpoints are failing
+          description: >-
+            Up to 3 consecutive failures are tolerated before the job restarts. Usually MinIO
+            (checkpoint storage) is unreachable, or the sink's flush to Postgres is slow/blocked.
+
+      # Checkpoints run every 30s -- 2 minutes without one means a failure/restart would replay
+      # (and recompute) far more than usual.
+      - alert: FlinkNearlineNoRecentCheckpoint
+        expr: time() - max(flink_jobmanager_job_lastCheckpointCompletedTimestamp) / 1000 > 120
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No Flink nearline checkpoint completed in {{ $value | humanizeDuration }}
+
+      # --- Freshness ----------------------------------------------------------------------------
+
+      # The end-to-end freshness SLI: how long after its window closed the stalest batch in the
+      # last commit reached Postgres (RecommendationCacheJdbcSink's outputFreshnessLagMillis).
+      # Healthy is under ~1 minute (watermark delay + waiting for the next checkpoint flush).
+      - alert: FlinkNearlineOutputStale
+        expr: max(flink_taskmanager_job_task_operator_outputFreshnessLagMillis) / 1000 > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Nearline recommendations reach Postgres {{ $value | humanizeDuration }} after their window closes
+
+      # Event-time progress at the window operator. With IdleAdvancingWatermarkGenerator this
+      # stays within ~35s of now even with no traffic, so a large lag means the job is falling
+      # behind (or the watermark is stuck).
+      - alert: FlinkNearlineWatermarkLagHigh
+        expr: >-
+          time() - max(flink_taskmanager_job_task_operator_currentInputWatermark{operator_name="user_windowed_candidate_scorer"}) / 1000
+          > 180
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Flink nearline watermark is {{ $value | humanizeDuration }} behind wall-clock time
+
+      # Views published to Kafka but not yet consumed by the job.
+      - alert: FlinkNearlineKafkaConsumerLagHigh
+        expr: max(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_lag_max) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Flink nearline job is {{ $value | humanize }} records behind on movie-view-events
+
+      # --- Completeness -------------------------------------------------------------------------
+
+      # Malformed events are skipped (not retried forever), so this is the only signal they exist.
+      - alert: FlinkNearlineSkippingBadEvents
+        expr: increase(flink_taskmanager_job_task_operator_deserializer_skippedMovieViewEvents[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Flink nearline job skipped {{ $value | humanize }} malformed movie view events in 10 minutes
+          description: Check the taskmanager log for "Skipping movie view event" to see the payloads.

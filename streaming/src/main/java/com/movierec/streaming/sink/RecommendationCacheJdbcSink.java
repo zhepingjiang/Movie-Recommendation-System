@@ -13,6 +13,7 @@ import java.util.Map;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
+import org.apache.flink.metrics.Gauge;
 
 /**
  * Writes each window firing's {@link ScoredCandidateBatch} into {@code recommendation_cache}
@@ -45,7 +46,7 @@ public class RecommendationCacheJdbcSink implements Sink<ScoredCandidateBatch> {
     // FIX: was built on RichSinkFunction, the legacy SinkFunction API Flink 2.x moved into a
     // .legacy package -- new sinks should be built on the current Sink/SinkWriter API instead.
     public SinkWriter<ScoredCandidateBatch> createWriter(WriterInitContext context) throws IOException {
-        return new Writer(jdbcUrl, username, password);
+        return new Writer(jdbcUrl, username, password, context);
     }
 
     private static final class Writer implements SinkWriter<ScoredCandidateBatch> {
@@ -75,7 +76,18 @@ public class RecommendationCacheJdbcSink implements Sink<ScoredCandidateBatch> {
         // it simply replaces the older buffered one instead of both being written.
         private final Map<Long, ScoredCandidateBatch> bufferedBatchesByUserId = new LinkedHashMap<>();
 
-        private Writer(String jdbcUrl, String username, String password) throws IOException {
+        // End-to-end freshness SLI for the nearline layer: at the most recent commit, how long
+        // after its window closed (in event time) the stalest committed batch reached Postgres.
+        // That covers watermark delay + waiting for the next checkpoint's flush + the write
+        // itself; the remaining piece of view-to-row latency (view -> end of the first window
+        // containing it) is bounded by WINDOW_SLIDE by design, so it doesn't need measuring.
+        // Holds its last value between commits (e.g. during no traffic), which is fine -- nothing
+        // is getting staler if nothing is being produced.
+        private volatile long lastCommitOutputLagMillis;
+
+        private Writer(String jdbcUrl, String username, String password, WriterInitContext context)
+                throws IOException {
+            context.metricGroup().gauge("outputFreshnessLagMillis", (Gauge<Long>) () -> lastCommitOutputLagMillis);
             try {
                 // FIX (same root cause CachedMovieSimilarityLookup works around): DriverManager's
                 // driver registry is JVM-wide and populated once via a ServiceLoader scan through
@@ -158,6 +170,12 @@ public class RecommendationCacheJdbcSink implements Sink<ScoredCandidateBatch> {
                 }
 
                 connection.commit();
+                long committedAtMillis = System.currentTimeMillis();
+                long oldestWindowEndMillis = bufferedBatchesByUserId.values().stream()
+                        .mapToLong(ScoredCandidateBatch::windowEndEpochMilli)
+                        .min()
+                        .getAsLong();
+                lastCommitOutputLagMillis = committedAtMillis - oldestWindowEndMillis;
                 bufferedBatchesByUserId.clear();
             } catch (SQLException e) {
                 rollbackQuietly();

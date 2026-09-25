@@ -118,6 +118,9 @@ services:
     image: prom/prometheus:latest
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Alert rules (prometheus.yml's rule_files) -- shown on Prometheus's own /alerts page. No
+      # Alertmanager yet, so nothing is routed to email/Slack.
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
@@ -144,18 +147,19 @@ services:
     depends_on:
       - prometheus
 
-  # FIX: docker names volumes root-owned on first creation, but flink-jobmanager/flink-taskmanager
-  # run as the image's built-in "flink" user (uid 9999), not root -- without this, Flink's
-  # checkpoint coordinator fails to start with "Failed to create directory for shared state"
-  # (verified: `docker compose exec flink-jobmanager ls -la /opt/flink-checkpoints` showed
-  # `root root` ownership, and a job submit failed with exactly that IOException). This one-shot
-  # container chowns the shared volume to uid 9999 before either Flink service starts.
-  flink-checkpoints-init:
-    image: flink:2.2.1-java17
-    user: root
-    entrypoint: ["sh", "-c", "chown -R 9999:9999 /opt/flink-checkpoints"]
-    volumes:
-      - flink_checkpoints:/opt/flink-checkpoints
+  # Creates the bucket Flink checkpoints into (application.properties' flink.checkpoint.dir,
+  # s3://flink-checkpoints/nearline). Flink's S3 filesystem doesn't create buckets itself, so
+  # without this the first checkpoint fails with NoSuchBucket. --ignore-existing keeps it a
+  # no-op on every start after the first. Uses the minio/minio server image (which bundles the
+  # `mc` client) rather than minio/mc -- the latter isn't pullable from Docker Hub anymore.
+  flink-checkpoints-bucket-init:
+    image: minio/minio:latest
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+             mc mb --ignore-existing local/flink-checkpoints"
+    depends_on:
+      minio:
+        condition: service_healthy
 
   flink-jobmanager:
     image: flink:2.2.1-java17
@@ -163,37 +167,51 @@ services:
     ports:
       - "8081:8081"
     environment:
+      # Links /opt/flink/opt's S3 filesystem into plugins/ at startup (the image ships it but
+      # doesn't enable it). Presto rather than the Hadoop S3 plugin: Flink's docs recommend
+      # Presto for checkpoint storage.
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-presto-2.2.1.jar
+      # metrics.reporter.prom.*: exposes Flink's metrics for Prometheus to scrape on :9249 (the
+      # reporter plugin is already in the image's plugins/). s3.*: points Flink's S3 filesystem
+      # at the local MinIO -- path-style access since MinIO doesn't do virtual-hosted buckets
+      # here. Dev-only default credentials, matching the minio service above -- not for anything
+      # beyond local dev.
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
     volumes:
       # Phase 0: lets `flink run` inside this container see jars built on the host without
       # rebuilding the image -- ./streaming/build/libs is where Gradle's shadowJar output lands.
       - ./streaming/build/libs:/opt/streaming-jobs
-      # FIX: MovieViewEventLoggerJob now checkpoints to file:///opt/flink-checkpoints
-      # (application.properties' flink.checkpoint.dir), but that path needs to be durable and
-      # visible to both the jobmanager and the taskmanager -- neither container had any shared
-      # volume before, so checkpoint state written by one wouldn't be readable by the other (or
-      # survive a container recreate) without this.
-      - flink_checkpoints:/opt/flink-checkpoints
     depends_on:
-      flink-checkpoints-init:
+      flink-checkpoints-bucket-init:
         condition: service_completed_successfully
 
   flink-taskmanager:
     image: flink:2.2.1-java17
     command: taskmanager
     environment:
+      # Same S3 plugin/config and metrics reporter as flink-jobmanager -- the taskmanager is what
+      # actually writes checkpoint state, and reports its own (task/operator-level) metrics.
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-presto-2.2.1.jar
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 2
-    volumes:
-      # FIX: see flink-jobmanager's matching mount -- same shared checkpoint directory, needed on
-      # this side too since checkpoint data is actually written from the taskmanager.
-      - flink_checkpoints:/opt/flink-checkpoints
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
     depends_on:
       flink-jobmanager:
         condition: service_started
-      flink-checkpoints-init:
+      flink-checkpoints-bucket-init:
         condition: service_completed_successfully
 
   frontend:
@@ -218,4 +236,3 @@ volumes:
   elasticsearch_data:
   prometheus_data:
   grafana_data:
-  flink_checkpoints:

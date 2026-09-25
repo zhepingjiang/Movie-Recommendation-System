@@ -1,5 +1,11 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alert rules only show on Prometheus's /alerts page for now -- no Alertmanager, so nothing is
+# delivered to email/Slack yet.
+rule_files:
+  - /etc/prometheus/alerts/*.yml
 
 scrape_configs:
   - job_name: backend
@@ -11,3 +17,11 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["recommendation:8000"]
+
+  # Flink's Prometheus reporter (metrics.reporter.prom.* in docker-compose.yml's FLINK_PROPERTIES).
+  # The jobmanager reports job-level metrics (running jobs, restarts, checkpoints); the
+  # taskmanager reports task/operator-level ones (throughput, watermarks, backpressure, Kafka lag,
+  # and the job's own custom metrics).
+  - job_name: flink
+    static_configs:
+      - targets: ["flink-jobmanager:9249", "flink-taskmanager:9249"]

@@ -1,13 +1,16 @@
 package com.movierec.streaming;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.movierec.streaming.events.MovieViewEvent;
 import com.movierec.streaming.scoring.UserWindowedCandidateScorer;
 import com.movierec.streaming.similarity.CachedMovieSimilarityLookup;
 import com.movierec.streaming.sink.RecommendationCacheJdbcSink;
+import com.movierec.streaming.watermark.IdleAdvancingWatermarkGenerator;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Properties;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -15,12 +18,17 @@ import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * For each user, aggregates recently-viewed movies over a sliding window, scores recommendation
@@ -51,12 +59,28 @@ public class MovieViewEventLoggerJob {
     // Events are produced synchronously when the backend serves a request, so out-of-orderness
     // should be small -- this just guards against Kafka partition skew/network jitter.
     private static final Duration MAX_EVENT_OUT_OF_ORDERNESS = Duration.ofSeconds(5);
+    // How long with no events at all before the watermark starts advancing on wall-clock time
+    // (see IdleAdvancingWatermarkGenerator) -- well under WINDOW_SLIDE, so a quiet period delays
+    // a window's firing by at most ~this long instead of indefinitely.
+    private static final Duration SOURCE_IDLE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration WINDOW_SIZE = Duration.ofMinutes(10);
     private static final Duration WINDOW_SLIDE = Duration.ofMinutes(1);
 
     // Shorter than WINDOW_SLIDE so a recovery never has to redo more than about one window
     // firing's worth of buffered events per user.
     private static final Duration CHECKPOINT_INTERVAL = Duration.ofSeconds(30);
+    // Flink's default is 10 minutes -- longer than this job's whole window, so a stuck
+    // checkpoint (e.g. MinIO unreachable, or a sink flush blocked on Postgres) would go
+    // unnoticed for 20 checkpoint intervals. 2 minutes still leaves plenty of headroom over a
+    // healthy checkpoint here (sub-second at current state size).
+    private static final Duration CHECKPOINT_TIMEOUT = Duration.ofMinutes(2);
+    // Guarantees the job some checkpoint-free processing time even if checkpoints start running
+    // long, instead of back-to-back checkpoints starving normal processing.
+    private static final Duration MIN_PAUSE_BETWEEN_CHECKPOINTS = Duration.ofSeconds(10);
+    // Consecutive checkpoint failures tolerated before failing (and restarting) the job. Absorbs
+    // a short MinIO blip (~3 intervals) without a restart, while a longer outage still escalates
+    // into the restart strategy below instead of silently running with no recovery point.
+    private static final int TOLERABLE_CONSECUTIVE_CHECKPOINT_FAILURES = 3;
 
     private static Properties loadApplicationProperties() {
         Properties applicationProperties = new Properties();
@@ -95,6 +119,16 @@ public class MovieViewEventLoggerJob {
     static StreamExecutionEnvironment createStreamExecutionEnvironment() {
         Configuration configuration = new Configuration();
         configuration.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, FLINK_CHECKPOINT_DIRECTORY);
+        // FIX: Flink deletes a job's checkpoints when it's cancelled (the default is
+        // DELETE_ON_CANCELLATION), so a `flink cancel` followed by resubmitting a fixed jar had no
+        // state to resume from -- open windows were lost. Retaining them allows
+        // `flink run -s <checkpoint path>` to pick up exactly where the cancelled job stopped.
+        configuration.set(
+                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+        configuration.set(CheckpointingOptions.CHECKPOINTING_TIMEOUT, CHECKPOINT_TIMEOUT);
+        configuration.set(CheckpointingOptions.MIN_PAUSE_BETWEEN_CHECKPOINTS, MIN_PAUSE_BETWEEN_CHECKPOINTS);
+        configuration.set(CheckpointingOptions.TOLERABLE_FAILURE_NUMBER, TOLERABLE_CONSECUTIVE_CHECKPOINT_FAILURES);
         configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "exponential-delay");
         // Pinned explicitly rather than left as Flink's unstated defaults -- same values Flink
         // 2.2.1 already defaults to, just visible here and immune to a future Flink upgrade
@@ -111,8 +145,8 @@ public class MovieViewEventLoggerJob {
         // consecutive failures without an intervening RESET_BACKOFF_THRESHOLD-long stretch of
         // healthy running is enough tolerance for a string of transient Postgres/Kafka hiccups,
         // capped by MAX_BACKOFF between each, before giving up and going to FAILED -- which
-        // today needs manual investigation/resubmission (tracked as a follow-up to add
-        // monitoring/alerting on job failure).
+        // needs manual investigation/resubmission (FlinkNearlineJobNotRunning in
+        // monitoring/alerts/flink-nearline.yml fires when that happens).
         configuration.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_ATTEMPTS, 10);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(configuration);
@@ -130,14 +164,28 @@ public class MovieViewEventLoggerJob {
                 .setBootstrapServers(KAFKA_BOOTSTRAP_SERVERS)
                 .setTopics(TOPIC)
                 .setGroupId(CONSUMER_GROUP_ID)
-                // Only events published after this job starts -- Phase 1 is just proving
-                // connectivity, not replaying the topic's full history.
-                .setStartingOffsets(OffsetsInitializer.latest())
+                // FIX: was OffsetsInitializer.latest(), which on every fresh submission (e.g.
+                // after `flink cancel` + resubmit) skipped every view made while the job was down.
+                // Resuming from this consumer group's offsets -- which the Kafka source commits
+                // on each completed checkpoint -- picks those views back up. LATEST only applies
+                // the very first time this group ever runs (no committed offsets yet), so a brand
+                // new deployment still doesn't replay the topic's full history. (Restoring from a
+                // checkpoint with `-s` ignores this entirely and uses the checkpointed offsets.)
+                // OffsetResetStrategy is deprecated in kafka-clients 4.x (the source of the
+                // compiler's deprecation note), but flink-connector-kafka 5.0.0-2.2 has no
+                // overload taking its replacement yet -- this is still the connector's only API
+                // for "committed offsets, falling back to X".
+                .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.LATEST))
                 .setValueOnlyDeserializer(new MovieViewEventDeserializationSchema())
                 .build();
 
+        // FIX: was WatermarkStrategy.forBoundedOutOfOrderness(...), whose watermark only moves
+        // when a newer event arrives -- after a quiet period, the windows holding the last few
+        // views never fired (so no nearline recs were written for them) until some later view
+        // pushed the watermark forward.
         WatermarkStrategy<MovieViewEvent> watermarkStrategy = WatermarkStrategy
-                .<MovieViewEvent>forBoundedOutOfOrderness(MAX_EVENT_OUT_OF_ORDERNESS)
+                .<MovieViewEvent>forGenerator(generatorContext -> new IdleAdvancingWatermarkGenerator<>(
+                        MAX_EVENT_OUT_OF_ORDERNESS, SOURCE_IDLE_TIMEOUT, System::currentTimeMillis))
                 .withTimestampAssigner((event, recordTimestamp) -> event.occurredAtEpochMilli());
 
         DataStreamSource<MovieViewEvent> movieViewEvents =
@@ -150,6 +198,9 @@ public class MovieViewEventLoggerJob {
                 .window(SlidingEventTimeWindows.of(WINDOW_SIZE, WINDOW_SLIDE))
                 .process(new UserWindowedCandidateScorer(
                         new CachedMovieSimilarityLookup(POSTGRES_JDBC_URL, POSTGRES_USERNAME, POSTGRES_PASSWORD)))
+                // Stable, readable operator_name label for this operator's metrics -- the
+                // watermark-lag alert and Grafana panel filter on it.
+                .name("user-windowed-candidate-scorer")
                 // FIX: was .addSink(...) against RichSinkFunction, the legacy SinkFunction API
                 // Flink 2.x moved into a .legacy package -- sinkTo(...) against the current
                 // Sink/SinkWriter API is the supported path for new sinks going forward.
@@ -159,18 +210,49 @@ public class MovieViewEventLoggerJob {
         env.execute("movie-view-event-logger-job");
     }
 
-    private static class MovieViewEventDeserializationSchema implements DeserializationSchema<MovieViewEvent> {
+    // Package-private (not private) so MovieViewEventDeserializationSchemaTest can exercise it
+    // directly.
+    static class MovieViewEventDeserializationSchema implements DeserializationSchema<MovieViewEvent> {
+
+        private static final Logger LOG = LoggerFactory.getLogger(MovieViewEventDeserializationSchema.class);
 
         private transient ObjectMapper objectMapper;
+        private transient Counter skippedMovieViewEvents;
 
         @Override
         public void open(InitializationContext context) {
-            objectMapper = new ObjectMapper();
+            objectMapper = new ObjectMapper()
+                    // FIX: Jackson's default fails on any field MovieViewEvent doesn't declare, so
+                    // the backend adding a new field to its event would have made every event
+                    // unreadable -- ignore unknown fields instead.
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            skippedMovieViewEvents = context.getMetricGroup().counter("skippedMovieViewEvents");
         }
 
         @Override
-        public MovieViewEvent deserialize(byte[] message) throws IOException {
-            return objectMapper.readValue(message, MovieViewEvent.class);
+        public MovieViewEvent deserialize(byte[] message) {
+            // FIX: a single malformed record used to throw straight out of here, failing the
+            // task -- and since the record is still at the same offset after restoring, every
+            // restart hit it again until the restart strategy's attempt cap was used up and the
+            // whole job went to FAILED. Returning null makes Flink's Kafka source skip the record
+            // (it only collects non-null results); the counter makes skips visible.
+            try {
+                MovieViewEvent event = objectMapper.readValue(message, MovieViewEvent.class);
+                // Parses fine but unusable downstream -- movieId is what the similarity lookup
+                // and candidate scoring key on.
+                if (event == null || event.movieId() == null) {
+                    return skip("missing movieId", message, null);
+                }
+                return event;
+            } catch (IOException e) {
+                return skip("unparseable JSON", message, e);
+            }
+        }
+
+        private MovieViewEvent skip(String reason, byte[] message, Exception cause) {
+            skippedMovieViewEvents.inc();
+            LOG.warn("Skipping movie view event ({}): {}", reason, new String(message, StandardCharsets.UTF_8), cause);
+            return null;
         }
 
         @Override

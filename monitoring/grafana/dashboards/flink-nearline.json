@@ -1,0 +1,511 @@
+{
+ "uid": "flink-nearline",
+ "title": "Flink Nearline - Freshness & Recovery",
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "10s",
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "row",
+   "title": "Freshness -- is new view data reaching recommendation_cache on time?",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "panels": []
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Output freshness lag (window close -> committed to Postgres)",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 1
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 120
+       }
+      ]
+     },
+     "custom": {
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(flink_taskmanager_job_task_operator_outputFreshnessLagMillis) / 1000",
+     "legendFormat": "lag",
+     "refId": "A"
+    }
+   ],
+   "description": "End-to-end freshness SLI (custom metric from RecommendationCacheJdbcSink). Alert: > 120s for 5m."
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Watermark lag at window operator",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 1
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 180
+       }
+      ]
+     },
+     "custom": {
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "time() - max(flink_taskmanager_job_task_operator_currentInputWatermark{operator_name=\"user_windowed_candidate_scorer\"}) / 1000",
+     "legendFormat": "lag",
+     "refId": "A"
+    }
+   ],
+   "description": "Wall-clock now minus the event-time watermark. Stays under ~35s even with no traffic thanks to IdleAdvancingWatermarkGenerator. Alert: > 180s for 2m."
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Kafka consumer lag (movie-view-events)",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 1
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1000
+       }
+      ]
+     },
+     "custom": {
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_lag_max)",
+     "legendFormat": "records behind",
+     "refId": "A"
+    }
+   ],
+   "description": "Alert: > 1000 records for 5m."
+  },
+  {
+   "id": 5,
+   "type": "row",
+   "title": "Errors & recovery",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 9
+   },
+   "panels": []
+  },
+  {
+   "id": 6,
+   "type": "stat",
+   "title": "Running jobs",
+   "gridPos": {
+    "h": 8,
+    "w": 4,
+    "x": 0,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(flink_jobmanager_numRunningJobs)",
+     "legendFormat": "running",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "stat",
+   "title": "Restarts (10m)",
+   "gridPos": {
+    "h": 8,
+    "w": 4,
+    "x": 4,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 4
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(flink_jobmanager_job_numRestarts[10m]))",
+     "legendFormat": "restarts",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Time since last completed checkpoint",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 120
+       }
+      ]
+     },
+     "custom": {
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "time() - max(flink_jobmanager_job_lastCheckpointCompletedTimestamp) / 1000",
+     "legendFormat": "since last checkpoint",
+     "refId": "A"
+    }
+   ],
+   "description": "Checkpoints every 30s to MinIO. Alert: > 120s for 1m."
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Failed checkpoints / skipped bad events (10m)",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(flink_jobmanager_job_numberOfFailedCheckpoints[10m]))",
+     "legendFormat": "failed checkpoints",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(flink_taskmanager_job_task_operator_deserializer_skippedMovieViewEvents[10m]))",
+     "legendFormat": "skipped malformed events",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "row",
+   "title": "Traffic & saturation",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 18
+   },
+   "panels": []
+  },
+  {
+   "id": 11,
+   "type": "timeseries",
+   "title": "Throughput",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 19
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=\"Source:_movie_view_events_source\"})",
+     "legendFormat": "views read from Kafka / s",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(flink_taskmanager_job_task_operator_numRecordsInPerSecond{operator_name=\"recommendation_cache_jdbc_sink:_Writer\"})",
+     "legendFormat": "user batches into sink / s",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "Busy / backpressured time per task",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 19
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ms"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (task_name) (flink_taskmanager_job_task_busyTimeMsPerSecond)",
+     "legendFormat": "busy: {{task_name}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (task_name) (flink_taskmanager_job_task_backPressuredTimeMsPerSecond)",
+     "legendFormat": "backpressured: {{task_name}}",
+     "refId": "B"
+    }
+   ],
+   "description": "ms per second (1000 = saturated). The bottleneck is the first task that is busy but NOT backpressured."
+  },
+  {
+   "id": 13,
+   "type": "timeseries",
+   "title": "Checkpoint duration & size",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 19
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(flink_jobmanager_job_lastCheckpointDuration)",
+     "legendFormat": "duration (ms)",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(flink_jobmanager_job_lastCheckpointFullSize)",
+     "legendFormat": "full state size (bytes)",
+     "refId": "B"
+    }
+   ],
+   "description": "Duration includes the sink's flush to Postgres (it runs as part of every checkpoint). Size = window state."
+  }
+ ]
+}

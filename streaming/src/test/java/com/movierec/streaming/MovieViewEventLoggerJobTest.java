@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import org.apache.flink.configuration.CheckpointingOptions;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -33,7 +34,7 @@ class MovieViewEventLoggerJobTest {
     // Matches application.properties' flink.checkpoint.dir default -- assumes FLINK_CHECKPOINT_DIR
     // isn't set in the environment running this test, same assumption the job's own
     // KAFKA_BOOTSTRAP_SERVERS/POSTGRES_* config already makes.
-    private static final String EXPECTED_CHECKPOINT_DIRECTORY = "file:///opt/flink-checkpoints";
+    private static final String EXPECTED_CHECKPOINT_DIRECTORY = "s3://flink-checkpoints/nearline";
 
     @Test
     void checkpointingIsEnabledWithAnExponentialBackoffRestartStrategy() {
@@ -45,6 +46,13 @@ class MovieViewEventLoggerJobTest {
         ReadableConfig configuration = env.getConfiguration();
         assertEquals(EXPECTED_RESTART_STRATEGY, configuration.get(RestartStrategyOptions.RESTART_STRATEGY));
         assertEquals(EXPECTED_CHECKPOINT_DIRECTORY, configuration.get(CheckpointingOptions.CHECKPOINTS_DIRECTORY));
+        // Retained on cancel so a cancelled job can be resumed with `flink run -s`.
+        assertEquals(
+                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION,
+                configuration.get(CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION));
+        assertEquals(Duration.ofMinutes(2), configuration.get(CheckpointingOptions.CHECKPOINTING_TIMEOUT));
+        assertEquals(Duration.ofSeconds(10), configuration.get(CheckpointingOptions.MIN_PAUSE_BETWEEN_CHECKPOINTS));
+        assertEquals(3, configuration.get(CheckpointingOptions.TOLERABLE_FAILURE_NUMBER));
 
         assertEquals(
                 Duration.ofSeconds(1),
