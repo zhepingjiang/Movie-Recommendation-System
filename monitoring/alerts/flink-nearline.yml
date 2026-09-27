@@ -39,9 +39,12 @@ groups:
           severity: warning
         annotations:
           summary: Flink nearline checkpoints are failing
+          # FIX: description read as if the alert waited for 3 consecutive failures; it actually
+          # fires on the first one (the 3 is Flink's TOLERABLE_FAILURE_NUMBER before restarting).
           description: >-
-            Up to 3 consecutive failures are tolerated before the job restarts. Usually MinIO
-            (checkpoint storage) is unreachable, or the sink's flush to Postgres is slow/blocked.
+            Fires on the first failed checkpoint, as an early warning. Flink tolerates up to 3
+            consecutive failures before restarting the job, so this may clear on its own. Usually
+            MinIO (checkpoint storage) is unreachable, or the sink's flush to Postgres is slow/blocked.
 
       # Checkpoints run every 30s -- 2 minutes without one means a failure/restart would replay
       # (and recompute) far more than usual.
