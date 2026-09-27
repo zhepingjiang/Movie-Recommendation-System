@@ -1,0 +1,97 @@
+# Single-node Elasticsearch, same setup as docker-compose.yml's elasticsearch service except for a
+# smaller heap (256m vs 512m) so the whole stack fits minikube's 8GB -- plenty for the ~10k-movie
+# `movies` index. The index isn't created by the app: populate it with
+# backend/scripts/index_movies_to_elasticsearch.py (POSTGRES_EXEC_COMMAND pointed at the k8s
+# postgres pod, ELASTICSEARCH_URL at a port-forward of this Service).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-data
+  namespace: movie-rec
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: movie-rec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  # Recreate for the same ReadWriteOnce-PVC reason as postgres.yaml.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        # The image runs as uid/gid 1000; makes the data volume writable by that group.
+        fsGroup: 1000
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:9.4.2
+          ports:
+            - containerPort: 9200
+          env:
+            # single-node also skips the production bootstrap checks (e.g. vm.max_map_count),
+            # which minikube's node doesn't satisfy by default.
+            - name: discovery.type
+              value: single-node
+            # Dev-only: auth + TLS off, matching docker-compose.yml -- the backend's client isn't
+            # configured for either.
+            - name: xpack.security.enabled
+              value: "false"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms256m -Xmx256m"
+          resources:
+            requests:
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: elasticsearch-data
+              mountPath: /usr/share/elasticsearch/data
+          # A single-node cluster is always yellow (replica shards have nowhere to go), so
+          # waiting for green would never pass.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -sf "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            failureThreshold: 6
+      volumes:
+        - name: elasticsearch-data
+          persistentVolumeClaim:
+            claimName: elasticsearch-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: movie-rec
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - port: 9200
+      targetPort: 9200

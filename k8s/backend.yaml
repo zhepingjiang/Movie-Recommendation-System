@@ -55,6 +55,10 @@ spec:
               value: redis
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka.movie-rec.svc.cluster.local:9092
+            # FIX: was unset, so application.yml's default (http://localhost:9200) pointed search
+            # at this pod itself and every /api/search request failed.
+            - name: ELASTICSEARCH_URIS
+              value: http://elasticsearch:9200
             - name: MINIO_ENDPOINT
               value: http://minio:9000
             - name: MINIO_PUBLIC_URL

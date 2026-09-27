@@ -3,13 +3,15 @@ One-off (re)index: reads every movie from postgres -- title, overview, director,
 genres, plus display-only fields -- and bulk-indexes them into Elasticsearch's `movies`
 index, dropping and recreating the index first so this is safe to rerun from scratch.
 
-Requires ELASTICSEARCH_URL in the environment (or defaults to localhost:9200) and the
+Requires ELASTICSEARCH_URL in the environment (or defaults to localhost:9200), optionally
+POSTGRES_EXEC_COMMAND (defaults to the docker-compose postgres container), and the
 `elasticsearch` Python package (see backend/scripts/requirements.txt). Not run by the app;
 rerun manually whenever movie/cast/director/genre data changes in postgres.
 """
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -20,6 +22,10 @@ from elasticsearch.helpers import bulk
 PG_CONTAINER = "movie-rec-system-postgres-1"
 PG_USER = "movierec"
 PG_DB = "movierec"
+
+# Command prefix that runs `psql` wherever postgres lives. Defaults to the docker-compose
+# container; for minikube, set it to e.g. "kubectl exec -n movie-rec deploy/postgres --".
+POSTGRES_EXEC_COMMAND = os.environ.get("POSTGRES_EXEC_COMMAND", f"docker exec {PG_CONTAINER}")
 
 ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
 MOVIES_INDEX = "movies"
@@ -77,7 +83,7 @@ SELECT json_agg(row_to_json(t)) FROM (
 
 def load_movies_from_postgres() -> list[dict]:
     result = subprocess.run(
-        ["docker", "exec", PG_CONTAINER, "psql", "-U", PG_USER, "-d", PG_DB, "-t", "-A", "-c", _MOVIES_WITH_CREDITS_SQL],
+        [*shlex.split(POSTGRES_EXEC_COMMAND), "psql", "-U", PG_USER, "-d", PG_DB, "-t", "-A", "-c", _MOVIES_WITH_CREDITS_SQL],
         capture_output=True,
         text=True,
         encoding="utf-8",
