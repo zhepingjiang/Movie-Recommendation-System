@@ -1,0 +1,148 @@
+# Nearline Flink job (MovieViewEventLoggerJob) on minikube, run by the Flink Kubernetes Operator in
+# application mode: the operator watches the FlinkDeployment below and creates/owns the
+# jobmanager + taskmanager pods and their Services itself. docker-compose.yml's session cluster
+# (flink-jobmanager/flink-taskmanager + host-mounted jar) is unchanged and still the local dev loop.
+#
+# Prerequisites (one-time, not managed by these manifests):
+#   1. Operator, installed with Helm into its own namespace, watching only movie-rec. The chart also
+#      creates the `flink` ServiceAccount + RBAC in movie-rec that the jobmanager uses to create
+#      taskmanager pods. webhook.create=false skips the admission webhook, which is the only part
+#      that needs cert-manager -- the operator still validates the spec when it reconciles it.
+#        helm repo add flink-operator-repo https://downloads.apache.org/flink/flink-kubernetes-operator-1.16.1/
+#        helm install flink-kubernetes-operator flink-operator-repo/flink-kubernetes-operator \
+#          --namespace flink-operator --create-namespace \
+#          --set webhook.create=false --set "watchNamespaces={movie-rec}"
+#   2. Job image, built from streaming/Dockerfile and loaded into minikube:
+#        docker build -t movie-rec-streaming:local streaming
+#        minikube image load movie-rec-streaming:local
+#   3. The movie-view-events topic must exist before the job starts (a source subscribing to a
+#      missing topic fails the job with a non-retryable UnknownTopicOrPartitionException):
+#        kubectl -n movie-rec exec deploy/kafka -- /opt/kafka/bin/kafka-topics.sh \
+#          --bootstrap-server localhost:9092 --create --if-not-exists --topic movie-view-events
+#
+# To ship a new job version: rebuild + load the image under a new tag, bump `image:` below, and
+# re-apply. With upgradeMode: savepoint the operator stops the running job with a savepoint and
+# starts the new one from it -- no manual `flink run -s`.
+
+# Same bucket setup as docker-compose.yml's flink-checkpoints-bucket-init (see the comment there for
+# why the 7-day expiry is safe with the hashmap state backend), plus a second bucket for the
+# operator's upgrade savepoints. Savepoints get their own bucket because the ILM rule applies to the
+# whole flink-checkpoints bucket (empty prefix) -- a savepoint there would be deleted after 7 days
+# even though it's the only thing a future upgrade can resume from.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flink-buckets-init
+  namespace: movie-rec
+spec:
+  # No depends_on in k8s: if MinIO isn't ready yet, the pod fails and the Job retries it.
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      enableServiceLinks: false
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          # The minio/minio server image bundles `mc`; minio/mc isn't pullable from Docker Hub
+          # anymore. Loaded into minikube from the host cache (see k8s/minio.yaml).
+          image: minio/minio:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: minio-credentials
+          command:
+            - sh
+            - -c
+            - |
+              mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+              mc mb --ignore-existing local/flink-checkpoints &&
+              echo '{"Rules":[{"ID":"expire-flink-checkpoints-after-7-days","Status":"Enabled","Filter":{"Prefix":""},"Expiration":{"Days":7}}]}' |
+              mc ilm import local/flink-checkpoints &&
+              mc mb --ignore-existing local/flink-savepoints
+---
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: nearline
+  namespace: movie-rec
+spec:
+  image: movie-rec-streaming:local
+  imagePullPolicy: IfNotPresent
+  flinkVersion: v2_2
+  serviceAccount: flink
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "2"
+    # Same Prometheus reporter as docker-compose's FLINK_PROPERTIES; the port is exposed on the pods
+    # via the podTemplate below.
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
+    # S3 filesystem pointed at the in-cluster MinIO. No s3.access-key/secret-key here: this map is
+    # rendered into a plain ConfigMap, so credentials come from the minio-credentials Secret as
+    # AWS_* env vars instead (podTemplate), which the Presto S3 filesystem reads through the
+    # default AWS credential chain.
+    s3.endpoint: http://minio:9000
+    s3.path.style.access: "true"
+    # Where the operator writes savepoints on upgrade/suspend.
+    execution.checkpointing.savepoint-dir: s3://flink-savepoints/nearline
+    # FIX: the operator refuses upgradeMode: savepoint without this ("Checkpoint directory must be
+    # defined") -- it only checks cluster config, not what the job sets in code. Same path the job
+    # already uses (application.properties' flink.checkpoint.dir); interval + retention stay in
+    # MovieViewEventLoggerJob.
+    execution.checkpointing.dir: s3://flink-checkpoints/nearline
+  podTemplate:
+    spec:
+      # Same reason as every other Deployment here: k8s' auto-injected *_PORT=tcp://... service
+      # env vars would otherwise collide with plain-integer config.
+      enableServiceLinks: false
+      containers:
+        # flink-main-container is the name the operator merges this template into, for both the
+        # jobmanager and taskmanager pods.
+        - name: flink-main-container
+          ports:
+            - name: metrics
+              containerPort: 9249
+          env:
+            # Consumed by MovieViewEventLoggerJob.resolveConfig -- needed on both pods, since the
+            # job's static config is initialized in every JVM that loads the class (jobmanager
+            # builds the job graph, taskmanagers run the source/sink).
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka.movie-rec.svc.cluster.local:9092
+            - name: POSTGRES_JDBC_URL
+              value: jdbc:postgresql://postgres:5432/movierec
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD
+  # Sized to keep the whole stack within minikube's 8GB. `memory` becomes Flink's
+  # *.memory.process.size, and the operator sets the container request/limit to match.
+  jobManager:
+    resource:
+      memory: 768m
+      cpu: 0.5
+  taskManager:
+    resource:
+      memory: 1280m
+      cpu: 0.5
+  job:
+    jarURI: local:///opt/flink/usrlib/streaming.jar
+    entryClass: com.movierec.streaming.MovieViewEventLoggerJob
+    parallelism: 1
+    upgradeMode: savepoint
+    state: running

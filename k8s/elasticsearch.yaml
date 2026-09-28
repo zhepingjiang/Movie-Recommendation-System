@@ -6,7 +6,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: elasticsearch-data
+  name: elasticsearch-data  # (A) the ES PVC object's name in the movie-rec namespace
   namespace: movie-rec
 spec:
   accessModes: ["ReadWriteOnce"]
@@ -60,7 +60,7 @@ spec:
             limits:
               memory: 1Gi
           volumeMounts:
-            - name: elasticsearch-data
+            - name: elasticsearch-data  # (B) refers to the ES pod volume under `volumes:` below
               mountPath: /usr/share/elasticsearch/data
           # A single-node cluster is always yellow (replica shards have nowhere to go), so
           # waiting for green would never pass.
@@ -80,9 +80,9 @@ spec:
             periodSeconds: 20
             failureThreshold: 6
       volumes:
-        - name: elasticsearch-data
+        - name: elasticsearch-data  # (B) the ES pod-local volume name
           persistentVolumeClaim:
-            claimName: elasticsearch-data
+            claimName: elasticsearch-data  # (A) refers to the ES PVC at the top of this file
 ---
 apiVersion: v1
 kind: Service
