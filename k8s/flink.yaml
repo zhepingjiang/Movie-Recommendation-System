@@ -28,7 +28,9 @@
 # why the 7-day expiry is safe with the hashmap state backend), plus a second bucket for the
 # operator's upgrade savepoints. Savepoints get their own bucket because the ILM rule applies to the
 # whole flink-checkpoints bucket (empty prefix) -- a savepoint there would be deleted after 7 days
-# even though it's the only thing a future upgrade can resume from.
+# even though it's the only thing a future upgrade can resume from. flink-ha (HA metadata: job graph
+# + pointer to the latest checkpoint) is kept out of that bucket for the same reason -- it's written
+# once at job start and still needed by a job that's been running for more than 7 days.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -59,7 +61,8 @@ spec:
               mc mb --ignore-existing local/flink-checkpoints &&
               echo '{"Rules":[{"ID":"expire-flink-checkpoints-after-7-days","Status":"Enabled","Filter":{"Prefix":""},"Expiration":{"Days":7}}]}' |
               mc ilm import local/flink-checkpoints &&
-              mc mb --ignore-existing local/flink-savepoints
+              mc mb --ignore-existing local/flink-savepoints &&
+              mc mb --ignore-existing local/flink-ha
 ---
 apiVersion: flink.apache.org/v1beta1
 kind: FlinkDeployment
@@ -85,6 +88,14 @@ spec:
     s3.path.style.access: "true"
     # Where the operator writes savepoints on upgrade/suspend.
     execution.checkpointing.savepoint-dir: s3://flink-savepoints/nearline
+    # FIX: without HA, a restarted jobmanager (pod restart, minikube stop/start) has no record of the
+    # job's latest checkpoint, so it re-ran the job from the last *upgrade savepoint* instead --
+    # rewinding state and Kafka offsets and discarding every checkpoint since. Kubernetes HA keeps
+    # that pointer in ConfigMaps (leader election + checkpoint IDs) and the job graph/metadata in
+    # MinIO, so any jobmanager restart resumes from the latest completed checkpoint. The `flink`
+    # ServiceAccount from the operator's Helm chart already has the ConfigMap RBAC this needs.
+    high-availability.type: kubernetes
+    high-availability.storageDir: s3://flink-ha/nearline
     # FIX: the operator refuses upgradeMode: savepoint without this ("Checkpoint directory must be
     # defined") -- it only checks cluster config, not what the job sets in code. Same path the job
     # already uses (application.properties' flink.checkpoint.dir); interval + retention stay in

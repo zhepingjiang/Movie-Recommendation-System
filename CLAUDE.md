@@ -58,6 +58,25 @@ This is a monorepo with three services:
 - This is especially important in Python, where type information is often less explicit than in Java.
 - A reader should be able to understand what a variable represents without inferring it from surrounding code.
 
+### Function Documentation
+
+- When writing or documenting a function/method, describe every parameter: what it is and what it's used for. Also describe the return value when there is one.
+- Java: use Javadoc with `@param` for each parameter and `@return` for the return value.
+- Python: use a Google-style docstring with an `Args:` section (one line per parameter) and a `Returns:` section. Example:
+
+  ```python
+  def score_candidates(viewed_movie_ids: list[int], top_n: int) -> list[tuple[int, float]]:
+      """Scores unseen movies by their similarity to the movies a user just viewed.
+
+      Args:
+          viewed_movie_ids: Movies the user viewed in the current window; their neighbors become candidates.
+          top_n: Maximum number of scored candidates to return.
+
+      Returns:
+          (candidate_movie_id, score) pairs, highest score first.
+      """
+  ```
+
 ## Communication
  
 - If a request is ambiguous, ask one clarifying question rather than guessing on something significant (e.g. database schema decisions, API contract between frontend and backend).
