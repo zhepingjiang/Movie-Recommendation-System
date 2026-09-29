@@ -34,7 +34,17 @@ groups:
       # --- Recovery point (checkpoints) ---------------------------------------------------------
 
       - alert: FlinkNearlineCheckpointFailing
-        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[5m]) > 0
+        # FIX: fired after every job start/upgrade/restart. The first checkpoint trigger (up to 30s
+        # after the job goes RUNNING) fails whenever the tasks aren't deployed yet -- always on k8s,
+        # where the taskmanager pod is only requested after the job is submitted -- and the next
+        # one succeeds, so there's nothing to act on. Failures are now only counted once the job has
+        # been running for 150s: the 30s trigger interval plus the 2m window, so a startup failure
+        # has already left the window by then. The metric and the jobmanager log still record every
+        # failure. A job that can't checkpoint at all from the start is still caught by
+        # FlinkNearlineNoRecentCheckpoint below.
+        expr: |-
+          increase(flink_jobmanager_job_numberOfFailedCheckpoints[2m]) > 0
+            and on(job_id) flink_jobmanager_job_runningTime > 150000
         labels:
           severity: warning
         annotations:
@@ -42,7 +52,8 @@ groups:
           # FIX: description read as if the alert waited for 3 consecutive failures; it actually
           # fires on the first one (the 3 is Flink's TOLERABLE_FAILURE_NUMBER before restarting).
           description: >-
-            Fires on the first failed checkpoint, as an early warning. Flink tolerates up to 3
+            Fires on the first failed checkpoint once the job has been running for 2.5 minutes, as
+            an early warning (failures during startup are ignored). Flink tolerates up to 3
             consecutive failures before restarting the job, so this may clear on its own. Usually
             MinIO (checkpoint storage) is unreachable, or the sink's flush to Postgres is slow/blocked.
 
