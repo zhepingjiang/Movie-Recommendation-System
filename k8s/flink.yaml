@@ -102,6 +102,12 @@ spec:
     # MovieViewEventLoggerJob.
     execution.checkpointing.dir: s3://flink-checkpoints/nearline
   podTemplate:
+    metadata:
+      # Picked up by k8s/monitoring/prometheus.yml's pod discovery, on both the jobmanager and
+      # taskmanager pods (the operator merges this template into both).
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9249"
     spec:
       # Same reason as every other Deployment here: k8s' auto-injected *_PORT=tcp://... service
       # env vars would otherwise collide with plain-integer config.

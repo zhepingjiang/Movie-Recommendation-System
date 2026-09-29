@@ -1,0 +1,29 @@
+# Turns the files in this folder into ConfigMaps for the minikube Prometheus/Grafana, so
+# docker-compose (which bind-mounts them) and k8s read the same alert rules, provisioning and
+# dashboards -- no copies to keep in sync. Not applied on its own: k8s/monitoring/kustomization.yaml
+# includes this folder. It lives here rather than there because kustomize only reads generator files
+# at or below its kustomization.yaml.
+#
+# kustomize has no globs: a new alert-rule file or dashboard must be listed below too.
+#
+# Each generated name gets a content-hash suffix, and kustomize rewrites the Deployments'
+# references to it, so editing any file here rolls the pod that mounts it on the next apply.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: movie-rec
+
+configMapGenerator:
+  # Mounted at /etc/prometheus/alerts, same path as docker-compose, matching rule_files.
+  - name: prometheus-alerts
+    files:
+      - alerts/flink-nearline.yml
+  - name: grafana-datasources
+    files:
+      - grafana/provisioning/datasources/datasource.yml
+  - name: grafana-dashboard-provider
+    files:
+      - grafana/provisioning/dashboards/dashboard.yml
+  - name: grafana-dashboards
+    files:
+      - grafana/dashboards/flink-nearline.json
+      - grafana/dashboards/movie-rec-overview.json

@@ -21,6 +21,12 @@ spec:
     metadata:
       labels:
         app: backend
+      # Picked up by k8s/monitoring/prometheus.yml's pod discovery. /actuator/prometheus is
+      # permitAll in SecurityConfig.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
     spec:
       # FIX: Kubernetes auto-injects Docker-links-style env vars for every Service in the
       # namespace (e.g. REDIS_PORT=tcp://10.x.x.x:6379), which collided with and overrode the

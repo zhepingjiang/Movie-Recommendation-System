@@ -17,6 +17,11 @@ spec:
     metadata:
       labels:
         app: recommendation
+      # Picked up by k8s/monitoring/prometheus.yml's pod discovery (prometheus-fastapi-instrumentator).
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
     spec:
       enableServiceLinks: false
       containers:

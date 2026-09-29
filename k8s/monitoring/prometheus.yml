@@ -1,0 +1,53 @@
+# Prometheus config for minikube. docker-compose uses monitoring/prometheus.yml instead; the
+# global settings and rule_files are the same, only scrape_configs differ.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Mounted from the prometheus-alerts ConfigMap (monitoring/alerts/*.yml). Alert rules only show on
+# Prometheus's /alerts page for now -- no Alertmanager, so nothing is delivered to email/Slack yet.
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+scrape_configs:
+  # One job for every pod that opts in with annotations on its pod template:
+  #   prometheus.io/scrape: "true"
+  #   prometheus.io/port:   "<metrics port>"
+  #   prometheus.io/path:   "<metrics path>"   (optional, defaults to /metrics)
+  # Pods are discovered through the k8s API, so the Flink jobmanager/taskmanager pods the operator
+  # creates (and recreates) are picked up without a Service in front of them, and every replica is
+  # scraped separately. Needs list/watch on pods -- see the Role in prometheus.yaml.
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+        # Only this namespace, which is what lets the RBAC be a namespaced Role rather than a
+        # ClusterRole.
+        namespaces:
+          names: [movie-rec]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        regex: "true"
+        action: keep
+      # Skip pods that are finished or not started yet (e.g. completed Jobs).
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        regex: (.+)
+        target_label: __metrics_path__
+      # Discovery yields one target per declared container port; replace the port with the
+      # annotated one. Pods expose several ports (e.g. recommendation's 50051 gRPC), so this
+      # yields duplicate identical targets, which Prometheus de-duplicates.
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      # job = the pod's `app` label, so the overview dashboard's job="backend"/"recommendation"
+      # filters match the same way they do against docker-compose. The operator labels both Flink
+      # pods app=nearline; the Flink alerts and dashboard don't filter on job.
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: job
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod

@@ -1,0 +1,21 @@
+# Prometheus + Grafana on minikube. Apply with:
+#   kubectl apply -k k8s/monitoring
+# (not `kubectl apply -f k8s/`, which doesn't run kustomize and would skip the generated ConfigMaps).
+#
+# Alert rules, Grafana provisioning and dashboards come from ../../monitoring (see the
+# kustomization.yaml there), the same files docker-compose mounts. Only the scrape config is
+# k8s-specific: docker-compose's monitoring/prometheus.yml uses fixed hostnames
+# (host.docker.internal, flink-jobmanager), while this one discovers pods through the k8s API.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: movie-rec
+
+resources:
+  - ../../monitoring
+  - prometheus.yaml
+  - grafana.yaml
+
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml
