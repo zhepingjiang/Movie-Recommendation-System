@@ -16,18 +16,27 @@ def test_get_cursor_connects_with_configured_params(monkeypatch):
         assert cursor is mock_conn.cursor.return_value.__enter__.return_value
 
     mock_connect.assert_called_once_with(
-        host=db.DB_HOST, port=db.DB_PORT, dbname=db.DB_NAME, user=db.DB_USER, password=db.DB_PASSWORD
+        host=db.DB_HOST,
+        port=db.DB_PORT,
+        dbname=db.DB_NAME,
+        user=db.DB_USER,
+        password=db.DB_PASSWORD,
+        cursor_factory=psycopg2.extras.RealDictCursor,
     )
 
 
 def test_get_cursor_uses_real_dict_cursor(monkeypatch):
     mock_conn = MagicMock()
-    monkeypatch.setattr(db.psycopg2, "connect", MagicMock(return_value=mock_conn))
+    mock_connect = MagicMock(return_value=mock_conn)
+    monkeypatch.setattr(db.psycopg2, "connect", mock_connect)
 
     with db.get_cursor():
         pass
 
-    assert mock_conn.cursor.call_args == call(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Set on the connection, not per cursor(): a factory passed to cursor() bypasses the
+    # OpenTelemetry psycopg2 instrumentation (see db.get_cursor).
+    assert mock_connect.call_args.kwargs["cursor_factory"] is psycopg2.extras.RealDictCursor
+    assert mock_conn.cursor.call_args == call()
 
 
 def test_get_cursor_commits_on_success(monkeypatch):

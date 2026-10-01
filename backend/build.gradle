@@ -20,6 +20,13 @@ repositories {
 
 ext {
 	grpcVersion = '1.83.0'
+	otelJavaagentVersion = '2.31.1'
+}
+
+configurations {
+	// The OpenTelemetry Java agent. Attached with -javaagent (see bootRun below), never put on the
+	// app's own classpath.
+	otelJavaagent
 }
 
 dependencies {
@@ -54,6 +61,7 @@ dependencies {
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
+	otelJavaagent "io.opentelemetry.javaagent:opentelemetry-javaagent:${otelJavaagentVersion}"
 }
 
 // The .proto contract lives in /proto at the repo root (shared with the Python recommendation
@@ -85,6 +93,29 @@ tasks.named('test') {
 	jvmArgs '-Dfile.encoding=UTF-8', '-Dsun.jnu.encoding=UTF-8'
 }
 
+// Copies the agent to a fixed, version-free path, so -javaagent (and later the Dockerfile) doesn't
+// need to know the version.
+tasks.register('copyOtelJavaagent', Copy) {
+	from configurations.otelJavaagent
+	into layout.buildDirectory.dir('otel')
+	rename { 'opentelemetry-javaagent.jar' }
+}
+
 tasks.named('bootRun') {
 	jvmArgs '-Dfile.encoding=UTF-8', '-Dsun.jnu.encoding=UTF-8'
+	// Tracing is opt-in: `./gradlew bootRun -Potel`, with docker-compose.otel.yml's Collector up.
+	// Plain bootRun runs without the agent, exactly as before. Any OTEL_* already set in the shell
+	// wins over these defaults.
+	if (project.hasProperty('otel')) {
+		dependsOn 'copyOtelJavaagent'
+		jvmArgs "-javaagent:${layout.buildDirectory.file('otel/opentelemetry-javaagent.jar').get().asFile}"
+		[
+			OTEL_SERVICE_NAME          : 'backend',
+			OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+			// Traces only: Prometheus already scrapes the backend's metrics, and log correlation
+			// is Phase 6.
+			OTEL_METRICS_EXPORTER      : 'none',
+			OTEL_LOGS_EXPORTER         : 'none',
+		].each { name, defaultValue -> environment name, System.getenv(name) ?: defaultValue }
+	}
 }

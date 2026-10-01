@@ -1,0 +1,48 @@
+# Opt-in tracing for local dev. Tracing is off unless this file is layered on top of the base one:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d otel-collector tempo recommendation
+#
+# That starts the Collector + Tempo and recreates the recommendation container with tracing turned
+# on (env can't change on a running container). The backend runs on the host, so its agent is
+# turned on separately: `./gradlew bootRun -Potel` (see backend/build.gradle).
+#
+# To turn tracing off again, recreate recommendation from the base file alone:
+#   docker compose up -d recommendation
+# Traces are in Grafana (http://localhost:3000) -> Explore -> Tempo.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ./monitoring/otel-collector.yml:/etc/otelcol/config.yml:ro
+    ports:
+      # Loopback-only: the host-run backend's agent sends here; nothing outside the host should.
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:3.1.0
+    command: ["-target=all", "-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./monitoring/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      # Loopback-only, for checking /ready and /status/config by hand; Grafana reaches it on the
+      # compose network.
+      - "127.0.0.1:3200:3200"
+
+  recommendation:
+    environment:
+      OTEL_TRACING_ENABLED: "true"
+      OTEL_SERVICE_NAME: recommendation
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    # Map form, matching the base file's depends_on for this service (compose can't merge a list
+    # into a map).
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+volumes:
+  tempo_data:

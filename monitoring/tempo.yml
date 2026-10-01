@@ -1,0 +1,37 @@
+# Grafana Tempo 3.x, single binary (-target=all): every component runs in one process, with no
+# Kafka (Tempo 3 only needs Kafka in its distributed mode). Based on Tempo's own
+# example/docker-compose/single-binary/tempo.yaml at v3.1.0, minus the metrics-generator.
+#
+# Used by docker-compose.otel.yml (opt-in, off by default); written so k8s can reuse it unchanged.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: info
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        # Only the Collector sends here (OTLP/gRPC). 0.0.0.0 rather than "tempo:4317" so this file
+        # also works in k8s, where "tempo" resolves to the Service IP, which a pod can't bind.
+        grpc:
+          endpoint: "0.0.0.0:4317"
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+# Tempo 3 moved retention here (the old compactor block was removed); default is 336h. The worker
+# runs the retention jobs with this value; /status/config also shows a block_retention under
+# backend_scheduler.provider.compaction, but that one isn't used for deleting blocks.
+backend_worker:
+  compaction:
+    block_retention: 48h
+
+usage_report:
+  reporting_enabled: false

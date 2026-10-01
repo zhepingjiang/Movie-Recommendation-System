@@ -17,11 +17,19 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "movierec")
 @contextmanager
 def get_cursor():
     """Yields a dict-cursor on a short-lived connection, committing on success."""
+    # cursor_factory goes on connect(), not cursor(): OpenTelemetry's psycopg2 instrumentation
+    # (telemetry.py) wraps the connection's cursor factory, and a factory passed to cursor()
+    # replaces that wrapper, so those queries would produce no spans. Same RealDictCursor either way.
     conn = psycopg2.connect(
-        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        cursor_factory=psycopg2.extras.RealDictCursor,
     )
     try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        with conn.cursor() as cursor:
             yield cursor
         conn.commit()
     finally:

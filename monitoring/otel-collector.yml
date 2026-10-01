@@ -1,0 +1,47 @@
+# OpenTelemetry Collector config. The apps send spans here over OTLP; the Collector filters and
+# batches them and forwards them to Tempo. Apps only know about the Collector, so swapping the
+# trace backend or changing what's filtered needs no app change.
+#
+# Used by docker-compose.otel.yml (opt-in, off by default). Written so k8s can reuse it unchanged
+# through kustomize, as long as the Tempo Service there is also called "tempo".
+receivers:
+  otlp:
+    protocols:
+      # The Java agent and the Python SDK both send OTLP/HTTP; gRPC is open for anything else.
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Refuses data (the apps' exporters retry) instead of being OOMKilled when Tempo falls behind.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 200
+    spike_limit_mib: 50
+  # Background work that isn't a request, each of which would otherwise be its own trace and bury
+  # the real ones:
+  # - Prometheus scraping /actuator/prometheus every 15s.
+  # - HikariCP's housekeeper thread checking idle pool connections (a JDBC span with no SQL). The
+  #   same check inside a request (on connection checkout) is kept: it's real request latency.
+  filter/drop-noise:
+    error_mode: ignore
+    traces:
+      span:
+        - 'IsMatch(attributes["url.path"], "^/actuator/")'
+        - 'IsMatch(attributes["thread.name"], "^HikariPool-[0-9]+:housekeeper$")'
+  batch: {}
+
+exporters:
+  # otlp_grpc, not the older "otlp" name, which 0.161 logs as a deprecated alias.
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/drop-noise, batch]
+      exporters: [otlp_grpc/tempo]

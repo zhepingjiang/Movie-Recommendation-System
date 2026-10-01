@@ -1,4 +1,5 @@
-fastapi
+# >=0.142: main.py passes FastAPI(telemetry=...), which older versions reject.
+fastapi>=0.142
 uvicorn
 prometheus-fastapi-instrumentator
 pandas
@@ -8,3 +9,9 @@ grpcio
 scikit-surprise
 minio
 pyarrow
+# OpenTelemetry tracing (off unless OTEL_TRACING_ENABLED=true, see telemetry.py). Pinned: the
+# instrumentation packages are beta (0.x) and each release only works with one SDK release.
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-http==1.45.0
+opentelemetry-instrumentation-grpc==0.66b0
+opentelemetry-instrumentation-psycopg2==0.66b0
