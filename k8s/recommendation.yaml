@@ -1,8 +1,7 @@
 # Live serving path (grpc_server.py -> services/cold_start.py) only ever queries Postgres --
-# MinIO is touched solely by the offline training job (models/svd_training.py), which runs
-# manually from the host via recommendation/scripts/train_svd.py, not from this pod. That's why
-# this Deployment only overrides DB_HOST, matching docker-compose.yml's recommendation service
-# exactly.
+# MinIO is touched solely by the offline pipeline, which runs as its own pod from the nightly
+# CronJob in k8s/offline-pipeline-cronjob.yaml, not from this one. That's why this Deployment
+# only overrides DB_HOST, matching docker-compose.yml's recommendation service exactly.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

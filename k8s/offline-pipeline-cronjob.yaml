@@ -1,0 +1,101 @@
+# Nightly offline pipeline (SVD training -> content-based training -> blending), the same
+# scripts/run_offline_pipeline.py entry point that runs by hand from the host with docker-compose.
+# Reuses the recommendation image; only the command differs.
+#
+# One-time setup: SVD reads MovieLens ratings from ml-training-data/movielens/ml-latest-small/
+# ratings.parquet, which doesn't exist in a fresh k8s MinIO. Build it against the k8s Postgres (the
+# parquet holds postgres movies.id values, so a copy from docker-compose's MinIO is only valid if
+# both databases were seeded with the same ids):
+#   kubectl -n movie-rec exec deploy/recommendation -- mkdir -p /tmp/ml
+#   kubectl -n movie-rec cp <ml-latest-small dir>/ratings.csv <recommendation pod>:/tmp/ml/ratings.csv
+#   kubectl -n movie-rec cp <ml-latest-small dir>/links.csv <recommendation pod>:/tmp/ml/links.csv
+#   kubectl -n movie-rec exec deploy/recommendation -- \
+#     env MINIO_ENDPOINT=minio:9000 ML_DATASET_DIR=/tmp/ml python scripts/build_movielens_dataset.py
+# Until then every run fails at stage 1 (NoSuchBucket) and leaves recommendation_cache untouched.
+#
+# Trigger a run by hand (this skips concurrencyPolicy, which only applies to scheduled runs):
+#   kubectl -n movie-rec create job --from=cronjob/offline-pipeline offline-pipeline-manual-<n>
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offline-pipeline
+  namespace: movie-rec
+spec:
+  # 03:00 Toronto time; timeZone handles the EST/EDT switch.
+  schedule: "0 3 * * *"
+  timeZone: America/Toronto
+  # minikube is often stopped at 03:00. If it comes up within 6h (by 09:00), the missed run starts
+  # then; later than that, it waits for the next night.
+  startingDeadlineSeconds: 21600
+  # Every stage replaces its model_version's rows, so two overlapping runs would race each other.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry for a Postgres/MinIO blip. Each stage's delete + insert is one transaction, so a
+      # retry after a partial run is safe.
+      backoffLimit: 1
+      # Kills a hung run (e.g. a stuck DB connection) so Forbid doesn't block every night after it.
+      # A full run took 79s on minikube (2026-10-01). The deadline is wall-clock time, so a host
+      # that sleeps mid-run gets the run killed on wake once it's past this.
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: offline-pipeline
+        spec:
+          # Never, not OnFailure: each failed attempt keeps its own pod and logs.
+          restartPolicy: Never
+          enableServiceLinks: false
+          containers:
+            - name: offline-pipeline
+              image: movie-rec-recommendation:local
+              imagePullPolicy: IfNotPresent
+              command: ["python", "scripts/run_offline_pipeline.py"]
+              env:
+                - name: DB_HOST
+                  value: postgres
+                - name: DB_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-credentials
+                      key: POSTGRES_DB
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-credentials
+                      key: POSTGRES_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-credentials
+                      key: POSTGRES_PASSWORD
+                - name: MINIO_ENDPOINT
+                  value: minio:9000
+                # Dev-only: MinIO root credentials, same as Flink and the backend.
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-credentials
+                      key: MINIO_ROOT_USER
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-credentials
+                      key: MINIO_ROOT_PASSWORD
+                # Without this, print() output is block-buffered (no TTY), so kubectl logs shows
+                # nothing until exit, and an OOMKill loses it entirely.
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              # No CPU limit: the SVD grid search is single-threaded and CPU-bound, and the node is
+              # otherwise idle at 03:00.
+              # Measured peak RSS is ~2000Mi, almost all from the content-based stage's brute-force
+              # cosine KNN (a dense movies x movies distance matrix, so it grows with the square of
+              # the movie count). It was OOMKilled at a 1Gi limit.
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 2Gi
+                limits:
+                  memory: 2560Mi
