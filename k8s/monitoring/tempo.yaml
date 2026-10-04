@@ -1,0 +1,94 @@
+# Grafana Tempo on minikube: stores the traces the OTel Collector forwards and answers Grafana's
+# trace queries. Config comes from the generated ConfigMap tempo-config (monitoring/tempo.yml, the
+# same file docker-compose.otel.yml mounts).
+#
+# The Service must be called "tempo": monitoring/otel-collector.yml exports to tempo:4317 and the
+# Grafana datasource queries http://tempo:3200, both shared with docker-compose.
+
+# Keeps traces across pod restarts and `minikube stop`. tempo.yml's 48h retention keeps usage far
+# below this at dev traffic.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tempo-data
+  namespace: movie-rec
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: movie-rec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  # Recreate for the same ReadWriteOnce-PVC reason as postgres.yaml.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        # The image runs as uid 10001; makes the data volume writable by it.
+        fsGroup: 10001
+      containers:
+        - name: tempo
+          # Same version as docker-compose.otel.yml.
+          image: grafana/tempo:3.1.0
+          args:
+            - -target=all
+            - -config.file=/etc/tempo.yml
+          ports:
+            # 3200: query API (Grafana). 4317: OTLP/gRPC from the Collector.
+            - containerPort: 3200
+            - containerPort: 4317
+          resources:
+            requests:
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo.yml
+              subPath: tempo.yml
+            - name: data
+              mountPath: /var/tempo
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        # Name here is rewritten to the hashed generated name by kustomize.
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: tempo-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: movie-rec
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317

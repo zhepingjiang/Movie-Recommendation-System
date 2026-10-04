@@ -27,3 +27,11 @@ configMapGenerator:
     files:
       - grafana/dashboards/flink-nearline.json
       - grafana/dashboards/movie-rec-overview.json
+  # Tracing (k8s/monitoring/otel-collector.yaml and tempo.yaml), the same two files
+  # docker-compose.otel.yml mounts.
+  - name: otel-collector-config
+    files:
+      - otel-collector.yml
+  - name: tempo-config
+    files:
+      - tempo.yml

@@ -11,10 +11,14 @@ COPY backend/gradle gradle
 COPY backend/build.gradle backend/settings.gradle ./
 COPY backend/src src
 COPY proto ../proto
-RUN ./gradlew bootJar --no-daemon
+# copyOtelJavaagent puts the OpenTelemetry Java agent at build/otel/opentelemetry-javaagent.jar.
+RUN ./gradlew bootJar copyOtelJavaagent --no-daemon
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
+# Shipped in the image but not attached here: tracing stays off unless the deployment adds
+# -javaagent through JAVA_TOOL_OPTIONS (see k8s/backend.yaml).
+COPY --from=build /app/build/otel/opentelemetry-javaagent.jar opentelemetry-javaagent.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8", "-jar", "app.jar"]

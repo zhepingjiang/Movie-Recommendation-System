@@ -2,8 +2,9 @@
 # batches them and forwards them to Tempo. Apps only know about the Collector, so swapping the
 # trace backend or changing what's filtered needs no app change.
 #
-# Used by docker-compose.otel.yml (opt-in, off by default). Written so k8s can reuse it unchanged
-# through kustomize, as long as the Tempo Service there is also called "tempo".
+# Used by docker-compose.otel.yml (opt-in, off by default) and, unchanged, by minikube
+# (k8s/monitoring/otel-collector.yaml, through kustomize). That works because the Tempo Service
+# there is also called "tempo".
 receivers:
   otlp:
     protocols:

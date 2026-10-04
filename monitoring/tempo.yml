@@ -2,7 +2,8 @@
 # Kafka (Tempo 3 only needs Kafka in its distributed mode). Based on Tempo's own
 # example/docker-compose/single-binary/tempo.yaml at v3.1.0, minus the metrics-generator.
 #
-# Used by docker-compose.otel.yml (opt-in, off by default); written so k8s can reuse it unchanged.
+# Used by docker-compose.otel.yml (opt-in, off by default) and, unchanged, by minikube
+# (k8s/monitoring/tempo.yaml, through kustomize).
 stream_over_http_enabled: true
 
 server:

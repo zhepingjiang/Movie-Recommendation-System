@@ -71,6 +71,29 @@ spec:
               value: http://localhost:9000
             - name: COOKIE_SECURE
               value: "false"
+            # Tracing: attaches the OpenTelemetry Java agent that backend/Dockerfile ships in the
+            # image (the JVM reads JAVA_TOOL_OPTIONS itself, so the image's ENTRYPOINT is
+            # unchanged). Spans go to the Collector in k8s/monitoring/otel-collector.yaml. Removing
+            # JAVA_TOOL_OPTIONS turns tracing off.
+            - name: JAVA_TOOL_OPTIONS
+              value: -javaagent:/app/opentelemetry-javaagent.jar
+            - name: OTEL_SERVICE_NAME
+              value: backend
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4318
+            # Traces only, same as `bootRun -Potel`: Prometheus already scrapes the metrics.
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            # Tags every span with the pod that produced it. POD_NAME must be declared before the
+            # variable that references it.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: k8s.namespace.name=movie-rec,k8s.pod.name=$(POD_NAME)
           # No /actuator/health probe -- that endpoint is behind auth (see the future-improvements
           # note in the migration summary), so a plain TCP check is the honest option without
           # changing SecurityConfig as a side effect of this migration.

@@ -33,6 +33,23 @@ spec:
           env:
             - name: DB_HOST
               value: postgres
+            # Tracing (recommendation/telemetry.py), same three variables as
+            # docker-compose.otel.yml. Spans go to the Collector in
+            # k8s/monitoring/otel-collector.yaml. Removing OTEL_TRACING_ENABLED turns tracing off.
+            - name: OTEL_TRACING_ENABLED
+              value: "true"
+            - name: OTEL_SERVICE_NAME
+              value: recommendation
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4318
+            # Tags every span with the pod that produced it. POD_NAME must be declared before the
+            # variable that references it.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: k8s.namespace.name=movie-rec,k8s.pod.name=$(POD_NAME)
           readinessProbe:
             httpGet:
               path: /ping

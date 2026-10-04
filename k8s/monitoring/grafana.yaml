@@ -39,7 +39,8 @@ spec:
                   key: GF_SECURITY_ADMIN_PASSWORD
             # FIX: Grafana downloads and updates a set of preinstalled plugins (jaeger, influxdb,
             # mssql, loki...) on every start -- every restart here, since there's no PVC -- which
-            # OOMKilled it at the original 256Mi limit. Only the core Prometheus datasource is used.
+            # OOMKilled it at the original 256Mi limit. Only the core Prometheus and Tempo datasources
+            # are used.
             - name: GF_PLUGINS_PREINSTALL_DISABLED
               value: "true"
           ports:

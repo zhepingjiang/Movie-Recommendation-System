@@ -1,0 +1,70 @@
+# OpenTelemetry Collector on minikube: the backend and recommendation pods send spans here over
+# OTLP/HTTP (http://otel-collector:4318); it filters and batches them and forwards them to Tempo.
+# Config comes from the generated ConfigMap otel-collector-config (monitoring/otel-collector.yml,
+# the same file docker-compose.otel.yml mounts).
+#
+# Stateless, so no PVC: spans still in its batch when the pod stops are lost, nothing else.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: movie-rec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: otel-collector
+          # Same version as docker-compose.otel.yml.
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          args:
+            - --config=/etc/otelcol/config.yml
+          ports:
+            # 4318: OTLP/HTTP (what both apps use). 4317: OTLP/gRPC, open for anything else.
+            - containerPort: 4317
+            - containerPort: 4318
+          # The limit sits above the config's memory_limiter (200MiB + Go runtime overhead), so the
+          # Collector refuses data before the kubelet OOMKills it.
+          resources:
+            requests:
+              memory: 64Mi
+            limits:
+              memory: 300Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol/config.yml
+              subPath: otel-collector.yml
+          # TCP check: the shared config has no health_check extension.
+          readinessProbe:
+            tcpSocket:
+              port: 4318
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        # Name here is rewritten to the hashed generated name by kustomize.
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: movie-rec
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
