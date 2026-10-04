@@ -7,7 +7,7 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
-    editable: true
+    editable: false
   # Only reachable when tracing is turned on (docker-compose.otel.yml); otherwise it's listed but
   # queries fail, which costs nothing.
   - name: Tempo
@@ -15,4 +15,4 @@ datasources:
     type: tempo
     access: proxy
     url: http://tempo:3200
-    editable: true
+    editable: false
