@@ -86,6 +86,11 @@ spec:
               value: none
             - name: OTEL_LOGS_EXPORTER
               value: none
+            # Prints "[trace id,span id]" on every log line, so a trace in Tempo can be matched to
+            # `kubectl logs`. The agent puts both in the Logback MDC; Spring Boot's default console
+            # pattern has a slot for this.
+            - name: LOGGING_PATTERN_CORRELATION
+              value: "[%X{trace_id:-},%X{span_id:-}] "
             # Tags every span with the pod that produced it. POD_NAME must be declared before the
             # variable that references it.
             - name: POD_NAME

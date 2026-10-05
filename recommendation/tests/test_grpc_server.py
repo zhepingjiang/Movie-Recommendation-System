@@ -20,6 +20,20 @@ class _FakeContext:
         raise _Aborted()
 
 
+def test_get_cold_start_recommendations_logs_one_line_per_call(monkeypatch, caplog):
+    monkeypatch.setattr(grpc_server, "get_cold_start_recommendations", lambda user_id, limit: [])
+
+    servicer = grpc_server.RecommendationServicer()
+    request = recommendation_pb2.ColdStartRequest(user_id=7, limit=5)
+
+    with caplog.at_level("INFO", logger="grpc_server"):
+        servicer.GetColdStartRecommendations(request, _FakeContext())
+
+    assert [log_record.getMessage() for log_record in caplog.records] == [
+        "Cold-start recommendations: user_id=7 limit=5 result_count=0"
+    ]
+
+
 def test_get_cold_start_recommendations_returns_mapped_results(monkeypatch):
     fake_movies = [
         {

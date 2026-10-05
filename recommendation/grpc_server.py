@@ -5,12 +5,15 @@ FIX: this is now the only way to reach cold-start recommendations -- the old RES
 removed. The backend is the sole caller and resolves user_id from the JWT before calling here.
 """
 
+import logging
 from concurrent import futures
 
 import grpc
 
 from generated import recommendation_pb2, recommendation_pb2_grpc
 from services.cold_start import get_cold_start_recommendations
+
+logger = logging.getLogger(__name__)
 
 MIN_LIMIT = 1
 MAX_LIMIT = 50
@@ -25,6 +28,13 @@ class RecommendationServicer(recommendation_pb2_grpc.RecommendationServiceServic
             )
 
         results = get_cold_start_recommendations(request.user_id, request.limit)
+        # One line per call; with tracing on, telemetry.py's log format adds the trace id to it.
+        logger.info(
+            "Cold-start recommendations: user_id=%s limit=%s result_count=%s",
+            request.user_id,
+            request.limit,
+            len(results),
+        )
         return recommendation_pb2.ColdStartResponse(
             recommendations=[
                 recommendation_pb2.MovieRecommendation(

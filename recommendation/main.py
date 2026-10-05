@@ -4,7 +4,11 @@ from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from grpc_server import create_server
-from telemetry import configure_tracing
+from telemetry import configure_logging, configure_tracing
+
+# At import, not in lifespan: it must run exactly once per process, and lifespan runs once per
+# TestClient in the tests.
+configure_logging()
 
 
 @asynccontextmanager

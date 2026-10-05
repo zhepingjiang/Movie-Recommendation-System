@@ -6,8 +6,13 @@ When turned on, it traces the two things the serving path does: the gRPC server 
 backend call (continuing the backend's trace from the traceparent in the gRPC metadata) and one
 span per psycopg2 query. Spans go to the OTel Collector over OTLP/HTTP; the exporter reads the
 standard OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME env vars itself.
+
+configure_logging() sets up the application's log output either way; with tracing on, every line
+also carries the trace and span id of the request it was logged in, so a trace found in Tempo can
+be matched to its log lines (and the other way round).
 """
 
+import logging
 import os
 
 from opentelemetry import trace
@@ -19,6 +24,55 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 TRACING_ENABLED = os.environ.get("OTEL_TRACING_ENABLED", "false").lower() == "true"
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+# Same "[trace id,span id]" shape as the backend's LOGGING_PATTERN_CORRELATION (k8s/backend.yaml).
+TRACED_LOG_FORMAT = "%(asctime)s %(levelname)s [%(trace_id)s,%(span_id)s] %(name)s: %(message)s"
+
+
+class TraceContextLogFilter(logging.Filter):
+    """Stamps each log record with the trace and span id of the span it was logged in."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Adds trace_id and span_id attributes to the record, for TRACED_LOG_FORMAT to print.
+
+        Args:
+            record: The log record about to be formatted; modified in place.
+
+        Returns:
+            Always True: this filter only annotates records, it never drops one.
+        """
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            # Lowercase hex, the form Tempo and the traceparent header use.
+            record.trace_id = format(span_context.trace_id, "032x")
+            record.span_id = format(span_context.span_id, "016x")
+        else:
+            # Logged outside any request (startup, shutdown): empty, so the format still applies.
+            record.trace_id = ""
+            record.span_id = ""
+        return True
+
+
+def configure_logging() -> None:
+    """Sends the application's own log lines (INFO and above) to stderr.
+
+    Uvicorn only configures its own "uvicorn.*" loggers, so without this the root logger has no
+    handler and INFO lines from this codebase are dropped. Uvicorn's access and error lines keep
+    their own format. Call once per process: every call adds another handler.
+    """
+    log_handler = logging.StreamHandler()
+    if TRACING_ENABLED:
+        # On the handler, not the root logger: logger-level filters don't run for records that
+        # propagate up from child loggers.
+        log_handler.addFilter(TraceContextLogFilter())
+        log_handler.setFormatter(logging.Formatter(TRACED_LOG_FORMAT))
+    else:
+        log_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(log_handler)
+    root_logger.setLevel(logging.INFO)
 
 
 def configure_tracing() -> TracerProvider | None:

@@ -4,6 +4,7 @@ import com.movierec.backend.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -21,6 +22,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
  * <p><b>Security-sensitive:</b> the fallback handler must never leak stack traces or raw
  * exception messages, which could expose internal implementation details.
  */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -85,8 +87,14 @@ public class GlobalExceptionHandler {
         if (ex instanceof org.springframework.web.ErrorResponse errorResponse) {
             HttpStatus status = HttpStatus.valueOf(errorResponse.getStatusCode().value());
             String detail = errorResponse.getBody().getDetail();
+            if (status.is5xxServerError()) {
+                log.error("Request to {} failed with {}", request.getRequestURI(), status.value(), ex);
+            }
             return build(status, detail != null ? detail : status.getReasonPhrase(), request);
         }
+        // FIX: unexpected exceptions were turned into a 500 without being logged anywhere, so the
+        // cause was lost. Logged server-side only; the response body still carries no detail.
+        log.error("Request to {} failed with an unexpected error", request.getRequestURI(), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", request);
     }
 

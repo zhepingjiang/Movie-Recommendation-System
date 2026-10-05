@@ -112,10 +112,13 @@ tasks.named('bootRun') {
 		[
 			OTEL_SERVICE_NAME          : 'backend',
 			OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-			// Traces only: Prometheus already scrapes the backend's metrics, and log correlation
-			// is Phase 6.
+			// Traces only: Prometheus already scrapes the backend's metrics, and logs stay on
+			// stdout.
 			OTEL_METRICS_EXPORTER      : 'none',
 			OTEL_LOGS_EXPORTER         : 'none',
+			// Prints "[trace id,span id]" on every log line. The agent puts both in the Logback
+			// MDC; Spring Boot's default console pattern has a slot for this.
+			LOGGING_PATTERN_CORRELATION: '[%X{trace_id:-},%X{span_id:-}] ',
 		].each { name, defaultValue -> environment name, System.getenv(name) ?: defaultValue }
 	}
 }
