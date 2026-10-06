@@ -14,26 +14,45 @@ _USER_GENRES_SQL = """
     WHERE ug.user_id = %s
 """
 
-_CANDIDATE_MOVIE_IDS_SQL = """
-    SELECT DISTINCT mg.movie_id AS movie_id
-    FROM movie_genres mg
-    JOIN genres g ON g.id = mg.genre_id
-    WHERE g.name = ANY(%s::text[])
-"""
-
-_MOVIES_WITH_GENRES_BY_IDS_SQL = """
+# Scores, ranks and cuts to `limit` inside Postgres, so only the rows that will be returned leave
+# the database. match_score is the Jaccard overlap: matching genres / (user's genres + movie's
+# genres - matching genres). Only movies sharing at least one genre with the user are candidates.
+# The trailing m.id makes the order (and so which movies survive the LIMIT) deterministic on ties.
+_TOP_GENRE_MATCHES_SQL = """
+    WITH movie_genre_counts AS (
+        SELECT
+            mg.movie_id,
+            COUNT(*) AS genre_count,
+            COUNT(*) FILTER (WHERE g.name = ANY(%(user_genres)s::text[])) AS matching_genre_count
+        FROM movie_genres mg
+        JOIN genres g ON g.id = mg.genre_id
+        GROUP BY mg.movie_id
+    ),
+    top_matches AS (
+        SELECT
+            m.id,
+            m.title,
+            m.poster_url,
+            m.average_rating,
+            m.rating_count,
+            c.matching_genre_count::float8
+                / (%(user_genre_count)s + c.genre_count - c.matching_genre_count) AS match_score
+        FROM movie_genre_counts c
+        JOIN movies m ON m.id = c.movie_id
+        WHERE c.matching_genre_count > 0
+        ORDER BY match_score DESC, m.average_rating DESC, m.id
+        LIMIT %(limit)s
+    )
     SELECT
-        m.id,
-        m.title,
-        m.poster_url,
-        m.average_rating,
-        m.rating_count,
-        COALESCE(array_agg(g.name) FILTER (WHERE g.name IS NOT NULL), '{}') AS genres
-    FROM movies m
-    LEFT JOIN movie_genres mg ON mg.movie_id = m.id
-    LEFT JOIN genres g ON g.id = mg.genre_id
-    WHERE m.id = ANY(%s::bigint[])
-    GROUP BY m.id
+        t.*,
+        ARRAY(
+            SELECT g.name
+            FROM movie_genres mg
+            JOIN genres g ON g.id = mg.genre_id
+            WHERE mg.movie_id = t.id
+        ) AS genres
+    FROM top_matches t
+    ORDER BY t.match_score DESC, t.average_rating DESC, t.id
 """
 
 # Used both when the user picked no genres at all, and to pad results when their picks matched
@@ -57,14 +76,6 @@ _TOP_RATED_EXCLUDING_SQL = """
 """
 
 
-def _jaccard(a: set, b: set) -> float:
-    if not a or not b:
-        return 0.0
-    intersection = len(a & b)
-    union = len(a | b)
-    return intersection / union if union else 0.0
-
-
 def _to_scored(movie: dict, match_score: float) -> dict:
     return {
         "id": movie["id"],
@@ -86,17 +97,17 @@ def get_cold_start_recommendations(user_id: int, limit: int = 10) -> list[dict]:
         cursor.execute(_USER_GENRES_SQL, (user_id,))
         user_genres = {row["name"] for row in cursor.fetchall()}
 
-        candidate_movies = []
+        top = []
         if user_genres:
-            cursor.execute(_CANDIDATE_MOVIE_IDS_SQL, (list(user_genres),))
-            candidate_ids = [row["movie_id"] for row in cursor.fetchall()]
-            if candidate_ids:
-                cursor.execute(_MOVIES_WITH_GENRES_BY_IDS_SQL, (candidate_ids,))
-                candidate_movies = cursor.fetchall()
-
-        scored = [_to_scored(m, _jaccard(user_genres, set(m["genres"]))) for m in candidate_movies]
-        scored.sort(key=lambda m: (m["match_score"], m["average_rating"]), reverse=True)
-        top = scored[:limit]
+            # FIX: every movie sharing a genre with the user (5,949 of 9,730 for Action + Drama)
+            # used to be fetched with its genres and scored and sorted here in Python, just to keep
+            # `limit` of them -- most of the request's latency. The query now does the scoring,
+            # ordering and LIMIT itself and returns only the top `limit` rows.
+            cursor.execute(
+                _TOP_GENRE_MATCHES_SQL,
+                {"user_genres": sorted(user_genres), "user_genre_count": len(user_genres), "limit": limit},
+            )
+            top = [_to_scored(movie, movie["match_score"]) for movie in cursor.fetchall()]
 
         remaining = limit - len(top)
         if remaining > 0:
