@@ -5,6 +5,29 @@ that work at different speeds: an offline nightly pipeline, a nearline streaming
 online request-time path. It runs locally with docker-compose and on Kubernetes (minikube), with
 metrics, alerts and distributed tracing.
 
+## Screenshots
+
+**Home page.** A signed-in user sees personalized recommendations, the trending row fed by view
+events, and new releases.
+
+![Home page with recommended, trending and new-release rows](docs/screenshots/app-home.png)
+
+**Onboarding and cold-start.** A new user picks genres in step 2, and step 3 shows cold-start
+recommendations built from those picks.
+
+| Step 2: pick genres | Step 3: cold-start recommendations |
+| --- | --- |
+| ![Genre selection during registration](docs/screenshots/app-onboarding-genres.png) | ![Cold-start recommendations after registration](docs/screenshots/app-onboarding-cold-start.png) |
+
+**Movie detail and search.** The detail page shows cast, director and similar movies from the
+content-based model. Search runs on Elasticsearch with genre and rating filters.
+
+| Movie detail with "More like this" | Search results for "spider man" |
+| --- | --- |
+| ![Movie detail page](docs/screenshots/app-movie-detail.png) | ![Search results](docs/screenshots/app-search.png) |
+
+More screenshots are in the [Observability](#observability) section below.
+
 ## Architecture
 
 The system is split by how fast each part has to react: online processing answers a request in
@@ -88,6 +111,34 @@ flowchart LR
 One trace covers a request end to end: backend HTTP, its SQL, the gRPC call, the Python gRPC
 handler and its SQL. Both services print the trace id on every log line, so a trace found in
 Grafana can be matched to its log lines and back.
+
+**One trace across both services.** A cold-start request in Grafana Tempo: the backend's spans are
+blue and the Python service's are green, with the gRPC call joining them.
+
+![Cold-start trace spanning the backend and the recommendation service](docs/screenshots/grafana-cold-start-trace.png)
+
+**Trace volume by service.** Span rate and duration for both services during a 30 minute run.
+
+![Traces overview grouped by service](docs/screenshots/grafana-traces-overview.png)
+
+**Nearline dashboard.** Freshness, recovery and saturation for the Flink job: output reaches
+Postgres about 19 s after a window closes, with one running job, no restarts and no failed
+checkpoints.
+
+![Grafana dashboard for the Flink nearline job](docs/screenshots/grafana-flink-dashboard.png)
+
+**Flink job.** The running job graph, and its checkpoint history with a checkpoint completing
+every 30 s.
+
+| Job graph | Checkpoint history |
+| --- | --- |
+| ![Flink job graph](docs/screenshots/flink-job-graph.png) | ![Flink checkpoint history](docs/screenshots/flink-checkpoints.png) |
+
+**Prometheus.** All four scrape targets up, and the eight alert rules for the nearline job.
+
+| Scrape targets | Alert rules |
+| --- | --- |
+| ![Prometheus targets](docs/screenshots/prometheus-targets.png) | ![Prometheus alert rules](docs/screenshots/prometheus-alerts.png) |
 
 ## The three recommendation paths
 
