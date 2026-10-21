@@ -95,3 +95,10 @@ recommendation:
     # offline blend deletes nearline_v1 rows older than this on every run -- keep in sync with
     # recommendation_blending.py's NEARLINE_MAX_AGE.
     max-age: PT2H
+
+geocoding:
+  nominatim:
+    base-url: ${NOMINATIM_BASE_URL:https://nominatim.openstreetmap.org}
+    # Nominatim's usage policy requires an identifying User-Agent and asks for contact details;
+    # set NOMINATIM_USER_AGENT to include a contact email/URL before any shared deployment.
+    user-agent: ${NOMINATIM_USER_AGENT:CineMind-dev/0.1 (movie-rec-system)}

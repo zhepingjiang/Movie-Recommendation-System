@@ -147,7 +147,10 @@ export default function MovieDetailPage() {
               </svg>
               Play now
             </button>
-            <button className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white">
+            <Link
+              to={`/movie/${movie.id}/theaters`}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white no-underline"
+            >
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -162,8 +165,8 @@ export default function MovieDetailPage() {
                 <path d="M13 17v2" />
                 <path d="M13 11v2" />
               </svg>
-              Get tickets
-            </button>
+              Find theaters
+            </Link>
             <button className="cursor-pointer rounded-md border border-white/25 bg-white/10 px-[26px] py-[11px] text-sm font-semibold text-white">
               + Add to watchlist
             </button>

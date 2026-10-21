@@ -44,6 +44,9 @@ dependencies {
 	implementation 'org.flywaydb:flyway-database-postgresql'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	implementation 'io.minio:minio:8.5.17'
+	// Uber H3 hexagonal grid: coarse "which cells are near me" prefilter for the nearby-theaters
+	// search. Bundles its native library for linux-x64 (the Docker image) and windows-x64.
+	implementation 'com.uber:h3:4.5.0'
 	implementation platform("io.grpc:grpc-bom:${grpcVersion}")
 	implementation 'io.grpc:grpc-netty-shaded'
 	implementation 'io.grpc:grpc-protobuf'
@@ -58,6 +61,11 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.springframework.security:spring-security-test'
+	// Throwaway Postgres (needs Docker running) for repository tests that must run real SQL.
+	// Versions come from Spring Boot's dependency management.
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'

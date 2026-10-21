@@ -4,6 +4,7 @@ import RequireAuth from './components/RequireAuth';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import MovieDetailPage from './pages/MovieDetailPage';
+import NearbyTheatersPage from './pages/NearbyTheatersPage';
 import ProfilePage from './pages/ProfilePage';
 import RegisterAccountPage from './pages/RegisterAccountPage';
 import RegisterExplorePage from './pages/RegisterExplorePage';
@@ -20,6 +21,7 @@ function App() {
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="movie/:id" element={<MovieDetailPage />} />
+          <Route path="movie/:id/theaters" element={<NearbyTheatersPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="login" element={<LoginPage />} />
           <Route

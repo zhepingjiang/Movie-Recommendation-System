@@ -68,7 +68,9 @@ public class SecurityConfig {
                                                 "/api/movies/**",
                                                 "/api/genres/**",
                                                 "/api/trending/**",
-                                                "/api/search/**")
+                                                "/api/search/**",
+                                                "/api/theatres/**",
+                                                "/api/geocode/**")
                                         .permitAll()
                                         .requestMatchers("/api/admin/**")
                                         .hasRole("ADMIN")

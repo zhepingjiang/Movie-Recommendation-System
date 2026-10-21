@@ -61,6 +61,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
     }
 
+    @ExceptionHandler(GeocodingUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleGeocodingUnavailable(
+            GeocodingUnavailableException ex, HttpServletRequest request) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
+    }
+
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex, HttpServletRequest request) {
         return build(HttpStatus.BAD_REQUEST, "Uploaded file exceeds the maximum allowed size", request);

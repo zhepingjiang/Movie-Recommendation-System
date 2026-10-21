@@ -12,7 +12,7 @@ export interface MovieQueryParams {
   [key: string]: string | number | undefined;
 }
 
-async function getJson<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
+export async function getJson<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
   const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== '') {
