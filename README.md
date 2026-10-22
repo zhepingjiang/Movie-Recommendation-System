@@ -2,8 +2,9 @@
 
 A movie browsing and recommendation app built as three services, with three recommendation paths
 that work at different speeds: an offline nightly pipeline, a nearline streaming job, and an
-online request-time path. It runs locally with docker-compose and on Kubernetes (minikube), with
-metrics, alerts and distributed tracing.
+online request-time path. A geospatial search finds theaters near the user using Uber's H3
+hexagonal grid. It runs locally with docker-compose and on Kubernetes (minikube), with metrics,
+alerts and distributed tracing.
 
 ## Screenshots
 
@@ -26,6 +27,15 @@ content-based model. Search runs on Elasticsearch with genre and rating filters.
 | --- | --- |
 | ![Movie detail page](docs/screenshots/app-movie-detail.png) | ![Search results](docs/screenshots/app-search.png) |
 
+**Find a theater nearby.** From a movie's page, the user enters an address or shares their
+location and picks a radius. Theaters showing the movie are listed by distance and pinned on a
+street map, and clicking a pin highlights that theater in the list. How the search works is in
+[Nearby theater search](#nearby-theater-search).
+
+| 5 km around Union Station | 2 km, theater 1 selected on the map |
+| --- | --- |
+| ![Nearby theaters within 5 km, with the search radius on a street map](docs/screenshots/app-nearby-theaters.png) | ![Nearby theaters within 2 km, with a selected pin](docs/screenshots/app-nearby-theaters-selected.png) |
+
 More screenshots are in the [Observability](#observability) section below.
 
 ## Architecture
@@ -42,11 +52,14 @@ flowchart TB
     subgraph online ["Online processing: per request, milliseconds"]
         direction LR
         frontend["frontend<br/>React + TypeScript + Vite"]
-        backend["backend<br/>Spring Boot, Java 21<br/>REST API, auth, search, trending,<br/>merges nearline into offline results"]
+        backend["backend<br/>Spring Boot, Java 21<br/>REST API, auth, search, trending,<br/>nearby theaters (H3),<br/>merges nearline into offline results"]
         recommendation["recommendation<br/>Python, FastAPI + gRPC<br/>cold-start for new users"]
         frontend -- REST --> backend
         backend -- "gRPC: cold-start" --> recommendation
     end
+
+    nominatim(["Nominatim<br/>OSM geocoder"])
+    backend -- "address lookup,<br/>throttled + cached" --> nominatim
 
     subgraph nearline ["Nearline processing: about a minute"]
         direction LR
@@ -61,7 +74,7 @@ flowchart TB
 
     subgraph stores ["Data stores"]
         direction LR
-        postgres[("PostgreSQL<br/>movies, users, ratings,<br/>recommendation_cache,<br/>movie_similarity_cache")]
+        postgres[("PostgreSQL<br/>movies, users, ratings,<br/>recommendation_cache,<br/>movie_similarity_cache,<br/>theaters + H3 cell index")]
         redis[("Redis<br/>trending sorted set,<br/>view dedup keys")]
         elasticsearch[("Elasticsearch<br/>movie search index")]
         minio[("MinIO (S3)<br/>avatars, training data,<br/>Flink checkpoints")]
@@ -152,6 +165,90 @@ The backend never calls the Python service for personalized recommendations: the
 straight from Postgres. Only cold-start goes over gRPC, and the user id for that call always comes
 from the JWT, never from client input.
 
+## Nearby theater search
+
+`GET /api/theaters/nearby?lat=&lng=&radiusKm=&movieId=` returns theaters within a radius (up to
+50 km) that have upcoming showtimes for a movie, sorted by distance or by next showtime, with
+paging. The data is every cinema in Ontario from OpenStreetMap: 130 theaters after removing
+duplicates, drive-ins and venues tagged as cinemas that aren't movie theaters.
+
+```mermaid
+flowchart LR
+    input(["address or<br/>browser location"])
+    geocode["Geocode<br/>Nominatim, 1 req/s throttle,<br/>Caffeine cache, 24 h TTL"]
+    cover["H3 cover<br/>user's cell + k rings<br/>(gridDisk)"]
+    prefilter[("Postgres<br/>h3_cell IN (...)<br/>B-tree index")]
+    exact["Exact filter<br/>haversine distance within r"]
+    rank["Join showtimes,<br/>sort, page"]
+
+    input --> geocode --> cover --> prefilter --> exact --> rank
+```
+
+1. **Geocode.** A typed address is turned into coordinates by a backend proxy to OpenStreetMap's
+   Nominatim, limited to Ontario. All lookups share one 1 request/s throttle, as Nominatim's usage
+   policy requires; a caller that would wait more than 3 s gets a 503 instead of holding a
+   request thread. Results are cached in Caffeine (1,000 queries, 24 h), keyed by the normalized
+   query.
+2. **Coarse filter with H3.** Every theater row stores its H3 cell at resolution 7 (hexagons with
+   about 1.4 km edges) in an indexed `BIGINT` column. The search computes the cells that could
+   contain a point within the radius and fetches only theaters in those cells with one
+   `IN (...)` query.
+3. **Exact filter.** The haversine distance drops candidates outside the circle. Every result
+   needs its distance anyway, for display and the distance sort.
+4. **Rank and page.** Showtimes for all theaters in range are fetched in one batch (sorting by next
+   showtime needs every theater, not just one page), then results are sorted and paged in memory.
+
+**How many rings.** For hexagons with edge `e`, a point within `r` of the user sits in a cell whose
+centre is at most `r + 2e` from the centre of the user's cell, and ring `k`'s nearest centres are
+`1.5 * k * e` away. So `k = ceil((r + 2e) / 1.5e)`, plus one ring of slack. `e` is measured from
+the actual cell at the search point rather than taken as the global average, because H3 cell size
+varies by location. The bound is the same one Apache Pinot's `H3IndexFilterOperator` uses for its
+"possible match" cells. A radius of 5 km covers 91 cells, and 50 km covers about 2,100.
+
+**Keeping cells correct.** `h3_cell` is derived data. It is computed in one helper class used by the
+JPA entity's `@PrePersist`/`@PreUpdate` hook, by the seed migration (a Flyway Java migration,
+since Postgres has no H3 functions without an extension), and by the search. A Testcontainers
+integration test runs every migration on a real Postgres and checks that the seeded cells and the
+search agree.
+
+### Why H3, compared with geohash and PostGIS
+
+All three can answer "what is within r km of this point". This is how they compared for this
+feature:
+
+| | H3 (chosen) | Geohash | PostGIS |
+| --- | --- | --- | --- |
+| Cell shape | Hexagons: all 6 neighbours are the same distance away, so k rings approximate a circle | Rectangles whose width shrinks with latitude; edge and corner neighbours are at different distances | No cells: exact geometry with an R-tree (GiST) index |
+| Radius query | One `IN` list of cell ids from `gridDisk`, then an exact check | Prefix query on the cell and its 8 neighbours, then an exact check. Two points metres apart across a cell boundary can share no prefix, so neighbours are always needed | `ST_DWithin` on a `geography` column: exact and indexed in one query |
+| Storage | `BIGINT` + B-tree | String + B-tree, prefix match | `geography` column + GiST, needs the PostGIS extension |
+| Works outside the database | Yes: the same cell id can key a Redis set, a Kafka partition or a Pinot/Flink aggregation | Yes | No, it is Postgres-only |
+| Cost here | A native library in the JVM (`com.uber:h3`) | Little code | A different Postgres image and an extension to manage |
+
+PostGIS would be the simplest choice if the search only ever ran inside Postgres; at 130 theaters
+`ST_DWithin` would be just as fast. H3 was chosen because the cell id is a portable key. The same
+id that filters rows here could partition a stream of user locations, aggregate demand per cell,
+or key a cache, which is how ride-hailing and delivery systems use it. Geohash has that
+portability too, but its rectangles give a poorer circle cover and need boundary handling.
+
+How well the prefilter works, measured against the 130 seeded theaters:
+
+| Search | Radius | H3 cells | Rows fetched by the prefilter | Theaters in range | Missed |
+| --- | --- | --- | --- | --- | --- |
+| Union Station, downtown Toronto | 2 km | 61 | 14 | 5 | 0 |
+| | 5 km | 91 | 16 | 7 | 0 |
+| | 25 km | 631 | 33 | 30 | 0 |
+| | 50 km | 2,107 | 49 | 43 | 0 |
+| Square One, Mississauga | 5 km | 91 | 6 | 1 | 0 |
+| | 50 km | 2,107 | 52 | 46 | 0 |
+
+The prefilter never dropped a theater that was in range, and it read 49 of 130 rows for the
+largest radius downtown. The extra rows at small radii come from the slack ring and from cells
+that only partly overlap the circle.
+
+The map is Leaflet with Stadia Maps dark tiles (OpenStreetMap data). Showtimes are generated mock
+data behind a `ShowtimeProvider` interface, so a real feed can replace them without touching the
+search.
+
 ## What was built
 
 In the order it was built. Numbers are explained under [Measured results](#measured-results).
@@ -159,8 +256,8 @@ In the order it was built. Numbers are explained under [Measured results](#measu
 **Foundation**
 
 - Web app in React 19, TypeScript, React Router, Vite and Tailwind CSS on a Spring Boot 4 (Java 21)
-  backend with Spring Data JPA and Lombok, exposing 18 REST endpoints.
-- PostgreSQL 16 schema managed by 14 versioned Flyway migrations, seeded with 9,730 movies plus
+  backend with Spring Data JPA and Lombok, exposing 20 REST endpoints.
+- PostgreSQL 16 schema managed by 17 versioned Flyway migrations, seeded with 9,730 movies plus
   cast and director data from MovieLens and TMDB. Everything runs in Docker Compose.
 - JWT authentication with Spring Security and JJWT, avatar storage on MinIO (S3 API), and TLS
   termination with Nginx and Certbot.
@@ -216,10 +313,24 @@ In the order it was built. Numbers are explained under [Measured results](#measu
 - Traces then found the slowest request and led to the fix in the
   [case study](#case-study-finding-a-slow-request-with-traces): p50 130 ms to 41 ms.
 
+**Geospatial search**
+
+- Nearby theater search over 130 Ontario cinemas imported from OpenStreetMap (Overpass API): an
+  H3 resolution-7 prefilter on an indexed cell column, then an exact haversine filter. The prefilter
+  missed no theater in range across 10 measured searches, and the endpoint answers in 8 to 20 ms
+  p50 for 2 to 50 km radii.
+- The ring count for the H3 cover is derived from hexagon geometry using the local cell size, and
+  matches the bound in Apache Pinot's H3 filter. H3 was chosen over geohash and PostGIS for its
+  near-circular cover and portable cell ids ([comparison](#why-h3-compared-with-geohash-and-postgis)).
+- Address search through a Nominatim proxy with a shared 1 req/s throttle that fails fast instead
+  of queueing, and a Caffeine cache. The front end shows results on a Leaflet street map, and
+  guards against stale responses when the search changes mid-request.
+
 **Testing**
 
-- 181 automated tests: 68 in the backend (JUnit 5, MockMvc, Spring Security Test), 15 in the Flink
-  job (Flink test utils) and 98 in the Python service (pytest).
+- 226 automated tests: 112 in the backend (JUnit 5, MockMvc, Spring Security Test, and
+  Testcontainers for a real-Postgres integration test of the migrations and the geo search), 15
+  in the Flink job (Flink test utils) and 99 in the Python service (pytest).
 
 ## Tech stack
 
@@ -234,6 +345,8 @@ In the order it was built. Numbers are explained under [Measured results](#measu
 | Frontend | React 19, React Router 7 | UI pages and routing |
 | | Vite 8 | Dev server and build |
 | | Tailwind CSS 4, PostCSS, Autoprefixer | Styling |
+| | Leaflet, react-leaflet | Street map for nearby theaters |
+| | Stadia Maps tiles | Dark map tiles (OpenStreetMap data) |
 | | oxlint | Linting |
 | Backend | Spring Boot 4.1 (Web MVC) | REST API |
 | | Spring Security, JJWT | JWT authentication |
@@ -244,6 +357,9 @@ In the order it was built. Numbers are explained under [Measured results](#measu
 | | Spring Data Elasticsearch | Movie search |
 | | gRPC Java | Client for the cold-start call |
 | | MinIO Java client | Avatar uploads |
+| | Uber H3 (h3-java) | Hexagonal grid prefilter for the nearby-theater search |
+| | Spring RestClient | Nominatim geocoding proxy |
+| | Caffeine | Geocoding result cache |
 | | Spring Boot Actuator, Micrometer | Metrics endpoint |
 | | Bean Validation, Lombok, Gradle | Request validation, boilerplate, build |
 | Recommendation | FastAPI, Uvicorn | App process hosting the gRPC server and metrics |
@@ -275,17 +391,20 @@ In the order it was built. Numbers are explained under [Measured results](#measu
 | | OpenTelemetry Java agent, Python SDK, Collector | Tracing |
 | | Grafana Tempo | Trace storage |
 | Testing | JUnit 5, MockMvc, Spring Security Test | Backend tests |
+| | Testcontainers (PostgreSQL) | Integration test of all migrations and the geo search on a real database |
 | | Flink test utils | Streaming job tests |
 | | pytest | Recommendation service tests |
 | Data sources | MovieLens | Ratings and movie catalogue |
 | | TMDB | Movie metadata and credits |
+| | OpenStreetMap (Overpass API, Nominatim) | Ontario theater locations, address geocoding |
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `frontend/` | React + TypeScript + Vite + Tailwind CSS |
-| `backend/` | Spring Boot (Java 21): REST API, auth, Kafka producer and consumer, Flyway migrations |
+| `backend/` | Spring Boot (Java 21): REST API, auth, Kafka producer and consumer, Flyway migrations, nearby-theater search (`geo/` holds the H3 and distance helpers) |
+| `backend/scripts/` | One-off script that fetches Ontario cinemas from OpenStreetMap into the seed CSV |
 | `recommendation/` | Python: gRPC cold-start service, offline training and blending jobs |
 | `streaming/` | Java Flink job for nearline recommendations |
 | `proto/` | gRPC contract shared by `backend/` and `recommendation/` |
@@ -353,6 +472,8 @@ production capacity.
 | View dedup | 1,200 views produced exactly 600 Kafka events | Each of 600 movies viewed twice within 30 s by one user |
 | Cold-start latency | p50 35.1 ms, p95 42.6 ms | 200 sequential requests after 300 warm-ups, client-side, user with one genre pick |
 | Search latency | p50 13.3 ms, p95 16.4 ms | Same protocol, `GET /api/search` |
+| Nearby theater latency | p50 / p95: 2 km 9.7 / 12.7 ms, 5 km 8.3 / 11.2 ms, 25 km 11.6 / 15.5 ms, 50 km 19.9 / 23.6 ms | 200 sequential requests per radius after 30 warm-ups, client-side, around Union Station, Toronto (measured 2026-10-22, SQL logging on) |
+| H3 prefilter | 0 theaters in range missed in 10 searches; 49 of 130 rows read for a 50 km search downtown | Cells from the app's own H3 code checked against every seeded theater's exact distance (see [Nearby theater search](#nearby-theater-search)) |
 | Search relevance | Actor-name precision@5: 0.146 before the AND + phrase-boost change, 0.974 after | 100 random actor names with 5+ movies; both query bodies sent to Elasticsearch |
 | SVD accuracy | RMSE 0.8728 with defaults, 0.8645 tuned (100 factors, 30 epochs, reg 0.1) | 5-fold cross-validation over 8 hyperparameter sets, 100,515 ratings, 610 users |
 | Nearline freshness | 13.1 to 32.1 s from window close to rows in Postgres | `outputFreshnessLagMillis` gauge sampled for 8 minutes of steady views |
@@ -383,4 +504,11 @@ Notes on reading these:
   recency are not used.
 - **The Flink similarity cache has no hit-rate metric,** so its benefit is known from the design
   and from logs, not from a dashboard.
+- **Theater showtimes are mock data,** generated per request. No free, licensed source of real
+  showtimes was found.
+- **Geocoding uses the public Nominatim service,** which allows 1 request/s and forbids
+  search-as-you-type, so there is no address autocomplete. Real traffic would need a self-hosted
+  or paid geocoder (for example Photon for autocomplete).
+- **Theater data covers Ontario only,** and some OpenStreetMap entries lack a street address or
+  city.
 - **Nothing has been tested under production load** or deployed to a public cloud.
