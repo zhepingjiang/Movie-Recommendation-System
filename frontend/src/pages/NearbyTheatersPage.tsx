@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchMovieById } from '../api/movies';
 import { fetchNearbyTheaters, geocodeAddress } from '../api/theaters';
@@ -41,6 +41,9 @@ export default function NearbyTheatersPage() {
   const [loadedPage, setLoadedPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+  // Bumped by every new search, so a "Load more" response from an earlier search can be ignored.
+  const searchGenerationRef = useRef(0);
   const [selectedTheaterId, setSelectedTheaterId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -62,6 +65,9 @@ export default function NearbyTheatersPage() {
   useEffect(() => {
     if (!searchLocation) return;
     let cancelled = false;
+    searchGenerationRef.current += 1;
+    setIsLoadingMore(false);
+    setLoadMoreFailed(false);
     setSearchStatus('loading');
     setSelectedTheaterId(null);
     fetchNearbyTheaters({
@@ -140,7 +146,9 @@ export default function NearbyTheatersPage() {
 
   async function handleLoadMore() {
     if (!searchLocation) return;
+    const searchGeneration = searchGenerationRef.current;
     setIsLoadingMore(true);
+    setLoadMoreFailed(false);
     try {
       const response = await fetchNearbyTheaters({
         lat: searchLocation.lat,
@@ -151,13 +159,18 @@ export default function NearbyTheatersPage() {
         page: loadedPage + 1,
         size: PAGE_SIZE,
       });
+      // FIX: the location, radius or sort changed while this page was loading; appending it would
+      // mix results from two different searches.
+      if (searchGeneration !== searchGenerationRef.current) return;
       setTheaters((previousTheaters) => [...previousTheaters, ...response.items]);
       setLoadedPage(response.page);
       setTotalPages(response.totalPages);
     } catch {
-      setSearchStatus('error');
+      // FIX: was setSearchStatus('error'), which hid the theaters already shown; now only the
+      // "Show more" button reports the failure and offers a retry.
+      if (searchGeneration === searchGenerationRef.current) setLoadMoreFailed(true);
     } finally {
-      setIsLoadingMore(false);
+      if (searchGeneration === searchGenerationRef.current) setIsLoadingMore(false);
     }
   }
 
@@ -234,9 +247,26 @@ export default function NearbyTheatersPage() {
           type="button"
           onClick={handleUseMyLocation}
           disabled={isLocating}
-          className="cursor-pointer rounded-md border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          📍 Use my location
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4 flex-none"
+          >
+            <circle cx="12" cy="12" r="7" />
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 2v3" />
+            <path d="M12 19v3" />
+            <path d="M2 12h3" />
+            <path d="M19 12h3" />
+          </svg>
+          Use my location
         </button>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Search radius">
           {RADIUS_OPTIONS_KM.map((radiusOptionKm) => (
@@ -317,14 +347,21 @@ export default function NearbyTheatersPage() {
                 />
               ))}
               {loadedPage + 1 < totalPages && (
-                <button
-                  type="button"
-                  onClick={handleLoadMore}
-                  disabled={isLoadingMore}
-                  className="mt-2 cursor-pointer self-center rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm text-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isLoadingMore ? 'Loading…' : 'Show more theaters'}
-                </button>
+                <div className="mt-2 flex flex-col items-center gap-1.5">
+                  {loadMoreFailed && (
+                    <div className="text-[13px] text-[#f87171]" role="status">
+                      Couldn't load more theaters.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={isLoadingMore}
+                    className="cursor-pointer rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm text-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isLoadingMore ? 'Loading…' : loadMoreFailed ? 'Try again' : 'Show more theaters'}
+                  </button>
+                </div>
               )}
             </div>
           )}

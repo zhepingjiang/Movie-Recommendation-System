@@ -89,6 +89,13 @@ public final class H3Cells {
      * Example at resolution 7 ({@code e} ~ 1.4 km): r = 5 km gives k = 5 (91 cells); r = 50 km
      * gives k = 27 (~2,270 cells).
      *
+     * <p>Cross-check: Apache Pinot's {@code H3IndexFilterOperator} (Uber's H3 distance filter) uses
+     * the same bound for its "possible match" cells, {@code floor((r/e + 2) / 1.5 + 0.001)}, but with
+     * the global average edge length; the +1 ring here covers our use of the local one. Pinot also
+     * splits off "always match" interior cells ({@code floor((r/e - 2) / sqrt(3))} rings) to skip the
+     * exact check for them. Not done here: every result needs its haversine distance anyway, for
+     * display and the distance sort.
+     *
      * @param radiusKm search radius in kilometres
      * @param edgeLengthKm hexagon edge length near the search centre, in kilometres
      * @return the gridDisk {@code k} to use

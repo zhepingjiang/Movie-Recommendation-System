@@ -58,7 +58,7 @@ class TheaterControllerTest {
         when(nearbyTheaterService.findNearbyTheaters(43.6, -79.4, 5, 1L, NearbyTheaterSort.NEXT_SHOWTIME, 0, 20))
                 .thenReturn(new PagedResponse<>(List.of(), 0, 20, 0, 0));
 
-        mockMvc.perform(get("/api/theatres/nearby")
+        mockMvc.perform(get("/api/theaters/nearby")
                         .param("lat", "43.6").param("lng", "-79.4").param("radiusKm", "5")
                         .param("movieId", "1").param("sort", "nextShowtime"))
                 .andExpect(status().isOk());
@@ -79,7 +79,7 @@ class TheaterControllerTest {
         "43.6, -79.4, 5, popularity",
     })
     void invalidParametersAreRejected(String lat, String lng, String radiusKm, String sort) throws Exception {
-        mockMvc.perform(get("/api/theatres/nearby")
+        mockMvc.perform(get("/api/theaters/nearby")
                         .param("lat", lat).param("lng", lng).param("radiusKm", radiusKm)
                         .param("movieId", "1").param("sort", sort))
                 .andExpect(status().isBadRequest());
@@ -92,14 +92,24 @@ class TheaterControllerTest {
         when(nearbyTheaterService.findNearbyTheaters(anyDouble(), anyDouble(), eq(50.0), anyLong(), eq(NearbyTheaterSort.DISTANCE), anyInt(), anyInt()))
                 .thenReturn(new PagedResponse<>(List.of(), 0, 20, 0, 0));
 
-        mockMvc.perform(get("/api/theatres/nearby")
+        mockMvc.perform(get("/api/theaters/nearby")
                         .param("lat", "43.6").param("lng", "-79.4").param("radiusKm", "50").param("movieId", "1"))
                 .andExpect(status().isOk());
     }
 
+    @ParameterizedTest
+    @CsvSource({"-1", "1001", "2147483647"})
+    void outOfRangePageIsRejected(String page) throws Exception {
+        mockMvc.perform(get("/api/theaters/nearby")
+                        .param("lat", "43.6").param("lng", "-79.4").param("movieId", "1").param("page", page))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(nearbyTheaterService);
+    }
+
     @Test
     void missingMovieIdIsRejected() throws Exception {
-        mockMvc.perform(get("/api/theatres/nearby").param("lat", "43.6").param("lng", "-79.4"))
+        mockMvc.perform(get("/api/theaters/nearby").param("lat", "43.6").param("lng", "-79.4"))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
  * showtimes.
  */
 @RestController
-@RequestMapping("/api/theatres")
+@RequestMapping("/api/theaters")
 @RequiredArgsConstructor
 public class TheaterController {
 
@@ -34,7 +34,7 @@ public class TheaterController {
      * @param radiusKm search radius in kilometres, greater than 0 and at most 50
      * @param movieId movie whose showtimes to list
      * @param sort {@code distance} (nearest first, the default) or {@code nextShowtime}
-     * @param page zero-based page index
+     * @param page zero-based page index, at most 1000
      * @param size page size
      * @return a page of nearby theaters with distance and showtimes; 400 on invalid parameters,
      *     404 if the movie doesn't exist
@@ -47,7 +47,8 @@ public class TheaterController {
                     double radiusKm,
             @RequestParam long movieId,
             @RequestParam(defaultValue = "distance") @Pattern(regexp = "distance|nextShowtime") String sort,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
+            // FIX: page had no upper bound, so a huge page overflowed page * size in the service (500).
+            @RequestParam(defaultValue = "0") @Min(0) @Max(1000) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         NearbyTheaterSort theaterSort =
                 sort.equals("nextShowtime") ? NearbyTheaterSort.NEXT_SHOWTIME : NearbyTheaterSort.DISTANCE;

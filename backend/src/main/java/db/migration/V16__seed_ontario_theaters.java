@@ -1,3 +1,5 @@
+// Not under com.movierec.backend on purpose: Flyway finds Java migrations by scanning its
+// locations (spring.flyway.locations = classpath:db/migration), and this package is that path.
 package db.migration;
 
 import com.movierec.backend.geo.H3Cells;

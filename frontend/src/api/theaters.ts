@@ -19,7 +19,7 @@ export interface NearbyTheaterQuery {
 }
 
 export function fetchNearbyTheaters(query: NearbyTheaterQuery): Promise<PagedResponse<NearbyTheater>> {
-  return getJson<PagedResponse<NearbyTheater>>('/api/theatres/nearby', {
+  return getJson<PagedResponse<NearbyTheater>>('/api/theaters/nearby', {
     ...query,
     lat: roundCoordinate(query.lat),
     lng: roundCoordinate(query.lng),

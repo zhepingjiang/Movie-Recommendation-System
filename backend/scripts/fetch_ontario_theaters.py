@@ -3,7 +3,7 @@ One-off fetch: pulls every cinema in Ontario from OpenStreetMap (Overpass API) a
 src/main/resources/db/seed/ontario_theaters.csv, which the V16__seed_ontario_theaters Java
 migration loads into the theaters table.
 
-Data is (c) OpenStreetMap contributors, ODbL -- the theatres page must keep that attribution.
+Data is (c) OpenStreetMap contributors, ODbL -- the theaters page must keep that attribution.
 Not run by the app; re-run manually to refresh, then add a new migration to load the new CSV
 (V16 is versioned and won't run twice).
 """
@@ -39,6 +39,18 @@ EARTH_RADIUS_KM = 6371.0
 DRIVE_IN_NAME_PATTERN = re.compile(r"\bdrive[\s-]?in\b", re.IGNORECASE)
 
 CSV_COLUMNS = ["osm_id", "name", "brand", "address", "city", "postal_code", "lat", "lng"]
+
+# FIX: tagged amenity=cinema in OSM but not movie theaters, so a re-fetch must not bring them back.
+EXCLUDED_OSM_IDS = {
+    "node/3580486880",  # Ripley's Selfie Studios
+    "node/3580513501",  # The Falls 3D/4D Movie (Niagara Falls attraction ride)
+}
+
+# FIX: OSM is missing street/city/postcode for these, which left only a house number. Values were
+# confirmed with a Nominatim reverse lookup; drop an entry once OSM itself has the tags.
+ADDRESS_OVERRIDES = {
+    "node/2649205951": {"address": "551 Huron Street", "city": "Stratford", "postal_code": "N5A 5T8"},
+}
 
 
 def fetch_overpass_elements() -> list[dict]:
@@ -86,8 +98,12 @@ def to_theater_row(element: dict) -> dict | None:
 
     Returns:
         The row as a dict keyed by CSV_COLUMNS, or None if the element should be skipped
-        (no name, no coordinates, or a seasonal drive-in).
+        (no name, no coordinates, a seasonal drive-in, or listed in EXCLUDED_OSM_IDS).
     """
+    osm_id = f"{element['type']}/{element['id']}"
+    if osm_id in EXCLUDED_OSM_IDS:
+        return None
+
     tags = element.get("tags", {})
     name = tags.get("name", "").strip()
     # Many drive-ins aren't tagged drive_in=yes in OSM, so the name is checked too.
@@ -103,7 +119,7 @@ def to_theater_row(element: dict) -> dict | None:
         part for part in (tags.get("addr:housenumber", ""), tags.get("addr:street", "")) if part
     )
     return {
-        "osm_id": f"{element['type']}/{element['id']}",
+        "osm_id": osm_id,
         "name": name,
         "brand": tags.get("brand", ""),
         "address": street_address,
@@ -111,6 +127,7 @@ def to_theater_row(element: dict) -> dict | None:
         "postal_code": tags.get("addr:postcode", ""),
         "lat": round(coordinates["lat"], 7),
         "lng": round(coordinates["lon"], 7),
+        **ADDRESS_OVERRIDES.get(osm_id, {}),
     }
 
 

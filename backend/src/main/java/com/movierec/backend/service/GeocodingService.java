@@ -3,13 +3,13 @@ package com.movierec.backend.service;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.movierec.backend.dto.GeocodeResultDto;
 import com.movierec.backend.exception.GeocodingUnavailableException;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -38,16 +38,14 @@ public class GeocodingService {
     /** A lookup that would have to wait longer than this for its throttle slot is refused instead. */
     private static final long MAX_THROTTLE_WAIT_MILLIS = 3000;
     private static final int MAX_CACHED_QUERIES = 1000;
+    /** OSM data changes slowly; a day keeps repeat lookups off Nominatim without going stale. */
+    private static final Duration CACHE_TTL = Duration.ofHours(24);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
 
     private final RestClient nominatimClient;
-    private final Map<String, List<GeocodeResultDto>> resultsByQuery =
-            Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, List<GeocodeResultDto>> eldest) {
-                    return size() > MAX_CACHED_QUERIES;
-                }
-            });
+    private final Cache<String, List<GeocodeResultDto>> resultsByQuery =
+            Caffeine.newBuilder().maximumSize(MAX_CACHED_QUERIES).expireAfterWrite(CACHE_TTL).build();
     private final Object throttleLock = new Object();
     private long nextRequestAllowedAtMillis = 0;
 
@@ -76,8 +74,8 @@ public class GeocodingService {
      * @throws GeocodingUnavailableException if Nominatim fails or the throttle queue is full
      */
     public List<GeocodeResultDto> geocode(String address) {
-        String normalizedQuery = address.trim().replaceAll("\s+", " ").toLowerCase(Locale.ROOT);
-        List<GeocodeResultDto> cachedResults = resultsByQuery.get(normalizedQuery);
+        String normalizedQuery = normalizeQuery(address);
+        List<GeocodeResultDto> cachedResults = resultsByQuery.getIfPresent(normalizedQuery);
         if (cachedResults != null) {
             return cachedResults;
         }
@@ -108,6 +106,19 @@ public class GeocodingService {
                 .toList();
         resultsByQuery.put(normalizedQuery, results);
         return results;
+    }
+
+    /**
+     * Normalizes a typed address so trivially different spellings share one cache entry and one
+     * Nominatim lookup.
+     *
+     * @param address the address as typed
+     * @return the address trimmed, lower-cased, with every whitespace run collapsed to one space
+     */
+    static String normalizeQuery(String address) {
+        // FIX: was "\s+" -- in a Java string that's a single space (Java 15+ escape), so the regex
+        // only collapsed spaces, not tabs or newlines. "\\s+" is the regex whitespace class.
+        return WHITESPACE_RUN.matcher(address.trim()).replaceAll(" ").toLowerCase(Locale.ROOT);
     }
 
     /**

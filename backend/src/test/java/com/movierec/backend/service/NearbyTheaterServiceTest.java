@@ -131,6 +131,17 @@ class NearbyTheaterServiceTest {
     }
 
     @Test
+    void pageWhoseOffsetOverflowsIntReturnsEmptyPage() {
+        givenTheaters(List.of(theaterAt(1, 1)), Map.of(1L, startingIn(Duration.ofHours(1))));
+
+        PagedResponse<NearbyTheaterDto> response = service.findNearbyTheaters(
+                SEARCH_LAT, SEARCH_LNG, 5, MOVIE_ID, NearbyTheaterSort.DISTANCE, Integer.MAX_VALUE, 50);
+
+        assertThat(response.items()).isEmpty();
+        assertThat(response.totalElements()).isEqualTo(1);
+    }
+
+    @Test
     void unknownMovieIsRejected() {
         when(movieRepository.existsById(anyLong())).thenReturn(false);
 

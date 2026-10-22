@@ -69,7 +69,7 @@ public class SecurityConfig {
                                                 "/api/genres/**",
                                                 "/api/trending/**",
                                                 "/api/search/**",
-                                                "/api/theatres/**",
+                                                "/api/theaters/**",
                                                 "/api/geocode/**")
                                         .permitAll()
                                         .requestMatchers("/api/admin/**")

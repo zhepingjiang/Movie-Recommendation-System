@@ -47,6 +47,8 @@ dependencies {
 	// Uber H3 hexagonal grid: coarse "which cells are near me" prefilter for the nearby-theaters
 	// search. Bundles its native library for linux-x64 (the Docker image) and windows-x64.
 	implementation 'com.uber:h3:4.5.0'
+	// Bounded, expiring in-memory cache for geocoding results; version from the Spring Boot BOM.
+	implementation 'com.github.ben-manes.caffeine:caffeine'
 	implementation platform("io.grpc:grpc-bom:${grpcVersion}")
 	implementation 'io.grpc:grpc-netty-shaded'
 	implementation 'io.grpc:grpc-protobuf'

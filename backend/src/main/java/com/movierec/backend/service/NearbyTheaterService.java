@@ -75,7 +75,9 @@ public class NearbyTheaterService {
                 .map(candidate -> toDto(candidate, showtimesByTheaterId.get(candidate.theater().getId())))
                 .toList();
 
-        int fromIndex = Math.min(page * size, matchingTheaters.size());
+        // FIX: page * size was int multiplication, so a large page overflowed to a negative index and
+        // subList threw; compute the offset as a long.
+        int fromIndex = (int) Math.min((long) page * size, matchingTheaters.size());
         int toIndex = Math.min(fromIndex + size, matchingTheaters.size());
         int totalPages = (matchingTheaters.size() + size - 1) / size;
         return new PagedResponse<>(
@@ -87,6 +89,9 @@ public class NearbyTheaterService {
         Comparator<TheaterWithDistance> byDistance = Comparator.comparingDouble(TheaterWithDistance::distanceKm);
         return switch (sort) {
             case DISTANCE -> byDistance;
+            // Intentionally only the first showtime: ShowtimeProvider returns each theater's upcoming
+            // showtimes earliest first (past ones excluded), so getFirst() is that theater's next
+            // showtime. Never empty here -- theaters without showtimes are filtered out before sorting.
             case NEXT_SHOWTIME -> Comparator.<TheaterWithDistance, Instant>comparing(
                             candidate -> showtimesByTheaterId.get(candidate.theater().getId()).getFirst().startTime())
                     .thenComparing(byDistance);
